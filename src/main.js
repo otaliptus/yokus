@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { GameClock, mulberry32, STOP_NAMES, clamp, lerp, V, C, ground, IS_MOBILE } from './palette.js';
+import { GameClock, mulberry32, STOP_NAMES, clamp, lerp, V, C, ground, isInRiver, IS_MOBILE } from './palette.js';
+import { setPose, faceFigure, faceFigureSmooth } from './figures.js';
 import { RendererPipeline, CameraRig, InteractionSystem, AudioManager, MusicManager } from './engine.js';
 import { World } from './world.js';
 import { StopDirector } from './stops.js';
@@ -34,6 +35,7 @@ class YokusGame {
       ending: document.querySelector('#ending-card'),
       endActions: document.querySelector('#end-actions'),
       replay: document.querySelector('#replay-btn'),
+      freeroam: document.querySelector('#freeroam-btn'),
       freekick: document.querySelector('#freekick-btn'),
       teaBtn: document.querySelector('#tea-btn'),
       breadBtn: document.querySelector('#bread-btn'),
@@ -91,6 +93,14 @@ class YokusGame {
       this.ui.openingResume?.classList.add('visible');
     }
 
+    this.freeroam = {
+      active: false,
+      vx: 0,
+      vz: 0,
+      walkTarget: null,
+      stepPuffAt: 0,
+    };
+
     this.lastFrame = performance.now();
     this.fps = 60;
 
@@ -109,6 +119,7 @@ class YokusGame {
       if (e.key === 'Enter' || e.key === ' ') this.begin();
     });
     this.ui.replay?.addEventListener('click', () => this.restart());
+    this.ui.freeroam?.addEventListener('click', () => this.startFreeRoam());
     this.ui.freekick?.addEventListener('click', () => this.startUnlimitedFreeKicks());
     this.ui.teaBtn?.addEventListener('click', () => this.startUnlimitedTea());
     this.ui.breadBtn?.addEventListener('click', () => this.startUnlimitedBread());
@@ -166,6 +177,11 @@ class YokusGame {
 
   restart() {
     this.stops.resetAll();
+    this.freeroam.active = false;
+    this.freeroam.vx = 0;
+    this.freeroam.vz = 0;
+    this.freeroam.walkTarget = null;
+    this.interactions.keys?.clear();
     this.state.ended = false;
     this.state.white = 0;
     this.state.memory = false;
@@ -235,10 +251,190 @@ class YokusGame {
     this.ui.fkHud?.classList.add('visible');
   }
 
+  startFreeRoam() {
+    if (!this.started) this.begin();
+    document.activeElement?.blur?.();
+    this.stops.resetAll();
+    this.state.ended = false;
+    this.state.white = 0;
+    this.setMemory(false);
+    this.ui.ending?.classList.remove('visible');
+    this.ui.endActions?.classList.remove('visible');
+
+    // Restore lively outdoor village state across every stop!
+    const w = this.world;
+    w.minibus.visible = false;
+    if (w.minibusObstacle) w.minibusObstacle.active = false;
+    w.memoryKids.forEach((k) => (k.visible = false));
+    w.memoryWall?.forEach((k) => (k.visible = false));
+    if (w.memoryKeeper) w.memoryKeeper.visible = false;
+    if (w.footballChild) w.footballChild.visible = false;
+    if (w.riverChild) w.riverChild.visible = false;
+    if (w.breadChild) w.breadChild.visible = false;
+    if (w.breadBitePiece) w.breadBitePiece.visible = false;
+    if (w.servedGlass) w.servedGlass.visible = false;
+    w.friend.visible = false;
+    w.selfChild.visible = false;
+    w.dede.visible = false;
+    w.openBook.visible = false;
+    w.youngAunt.visible = false;
+    w.aunt.visible = true;
+    if (w.auntHome) w.aunt.position.copy(w.auntHome);
+    setPose(w.aunt, 'stand', true);
+    w.bread.visible = true;
+    w.breadPieces.forEach((p) => (p.visible = true));
+    w.teaGlass.visible = true;
+    w.teaGlass.position.copy(w.teaGlassBase);
+    w.cayci.visible = true;
+    w.cayci.position.copy(w.cayciHome);
+    setPose(w.cayci, 'stand', true);
+    w.wall.forEach((k) => (k.visible = true));
+    w.keeper.visible = true;
+    w.pitchKids.forEach((k) => {
+      k.visible = true;
+      if (k.userData.homePos) k.position.copy(k.userData.homePos);
+      setPose(k, 'stand', true);
+    });
+    if (w.riverKid) {
+      w.riverKid.visible = true;
+      w.riverKid.position.copy(w.riverKidSeat);
+      setPose(w.riverKid, 'sit', true);
+      w.riverKid.userData.action = 'fish';
+      w.riverKid.userData.actionUntil = Infinity;
+      if (w.riverKidRod) w.riverKidRod.visible = true;
+    }
+    w.rodPivot.visible = true;
+    w.rodPivot.position.copy(w.rodRestPos);
+    w.rodPivot.rotation.set(0.14, 0, -0.08);
+    w.fishingLine.visible = false;
+    w.bobber.visible = false;
+    w.fishFlash.visible = false;
+    w.doorPivot.rotation.y = 0;
+    for (const c of w.cats) {
+      c.visible = true;
+      c.userData.pet = 0;
+      c.userData.running = false;
+      if (c.userData.homePos) c.position.copy(c.userData.homePos);
+      if (c.userData.homeYaw != null) c.rotation.y = c.userData.homeYaw;
+    }
+
+    // Start the player right outside great-grandfather's courtyard gate overlooking the whole village!
+    const startX = 0.0;
+    const startZ = -38.6;
+    this.player.visible = true;
+    this.player.position.set(startX, w.walkHeight(startX, startZ), startZ);
+    this.player.userData.action = 'idle';
+    this.player.userData.actionUntil = 0;
+    this.player.userData.turnTarget = null;
+    setPose(this.player, 'stand', true);
+    faceFigure(this.player, V(0, this.player.position.y, -28));
+
+    this.freeroam.active = true;
+    this.freeroam.vx = 0;
+    this.freeroam.vz = 0;
+    this.freeroam.walkTarget = null;
+    this.freeroam.stepPuffAt = 0;
+    this.interactions.keys?.clear();
+
+    this.state.stop = 5;
+    this.state.mode = 'freeroam';
+    this.rig.startFreeRoam(this.player.position, 0.36);
+    // Play the cozy fishing song during free roam!
+    this.music.setStop('river');
+    this.updateModeHud();
+    this.ui.fkHud?.classList.add('visible');
+  }
+
+  setFreeRoamTarget(x, z) {
+    if (this.state.mode !== 'freeroam') return;
+    this.freeroam.walkTarget = V(clamp(x, -82, 82), 0, clamp(z, -90, 76));
+  }
+
+  updateFreeRoam(dt) {
+    const fr = this.freeroam;
+    const keys = this.interactions.keys;
+    let inFwd = 0;
+    let inRight = 0;
+    if (keys.has('KeyW') || keys.has('ArrowUp') || keys.has('w')) inFwd += 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown') || keys.has('s')) inFwd -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight') || keys.has('d')) inRight += 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('a')) inRight -= 1;
+    const jogging = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('shift');
+
+    let dirX = 0;
+    let dirZ = 0;
+    let wantSpeed = 0;
+    if (inFwd !== 0 || inRight !== 0) {
+      fr.walkTarget = null;
+      const yaw = this.rig.yaw;
+      const fwdX = -Math.sin(yaw);
+      const fwdZ = -Math.cos(yaw);
+      const rgtX = Math.cos(yaw);
+      const rgtZ = -Math.sin(yaw);
+      dirX = fwdX * inFwd + rgtX * inRight;
+      dirZ = fwdZ * inFwd + rgtZ * inRight;
+      const len = Math.hypot(dirX, dirZ) || 1;
+      dirX /= len;
+      dirZ /= len;
+      wantSpeed = jogging ? 6.2 : 3.5;
+    } else if (fr.walkTarget) {
+      const dx = fr.walkTarget.x - this.player.position.x;
+      const dz = fr.walkTarget.z - this.player.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.32) {
+        fr.walkTarget = null;
+      } else {
+        dirX = dx / dist;
+        dirZ = dz / dist;
+        wantSpeed = dist > 5.0 ? 4.8 : 3.4;
+      }
+    }
+
+    const accel = 1 - Math.exp(-dt * 12);
+    fr.vx = lerp(fr.vx, dirX * wantSpeed, accel);
+    fr.vz = lerp(fr.vz, dirZ * wantSpeed, accel);
+
+    const spd = Math.hypot(fr.vx, fr.vz);
+    if (spd > 0.08) {
+      const pos = this.player.position;
+      pos.x += fr.vx * dt;
+      pos.z += fr.vz * dt;
+      this.world.resolveFreeRoamCollisions(pos, 0.3);
+      pos.y = this.world.walkHeight(pos.x, pos.z);
+      const pose = spd > 4.6 ? 'jog' : 'walk';
+      if (this.player.userData.pose !== pose) setPose(this.player, pose);
+      faceFigureSmooth(this.player, V(pos.x + fr.vx, pos.y, pos.z + fr.vz), dt, 12);
+
+      // Gentle splash puffs when wading across the shallow stream (off the stone bridge), or sunlit dust when jogging!
+      const wading = isInRiver(pos.x, pos.z, -0.2) && Math.abs(pos.x + 1.15) > 2.25;
+      if (this.time > fr.stepPuffAt) {
+        if (wading) {
+          fr.stepPuffAt = this.time + 0.28;
+          this.world.spawnPuff(V(pos.x, pos.y + 0.14, pos.z), 7, '#eef6fa');
+        } else if (pose === 'jog') {
+          fr.stepPuffAt = this.time + 0.34;
+          this.world.spawnPuff(V(pos.x, pos.y + 0.06, pos.z), 5, '#e4c386');
+        }
+      }
+    } else {
+      fr.vx = 0;
+      fr.vz = 0;
+      if (this.player.userData.pose !== 'stand') setPose(this.player, 'stand');
+    }
+
+    this.rig.updateFreeRoam(dt, this.player.position, fr.vx, fr.vz);
+  }
+
   returnToDuskPanorama() {
     this.football.unlimitedMode = false;
     this.tea.unlimitedMode = false;
     this.bread.unlimitedMode = false;
+    this.freeroam.active = false;
+    this.freeroam.vx = 0;
+    this.freeroam.vz = 0;
+    this.freeroam.walkTarget = null;
+    this.interactions.keys?.clear();
+    this.rig.setUserZoom(1.0);
     this.ui.fkHud?.classList.remove('visible');
     this.state.stop = 7;
     this.state.mode = 'final';
@@ -252,7 +448,9 @@ class YokusGame {
 
   updateModeHud() {
     if (!this.ui.fkScore) return;
-    if (this.football.unlimitedMode) {
+    if (this.state.mode === 'freeroam') {
+      this.ui.fkScore.textContent = IS_MOBILE ? 'tap to walk · drag to look' : 'wasd to roam · shift jog · drag look';
+    } else if (this.football.unlimitedMode) {
       const f = this.football;
       this.ui.fkScore.textContent = `goals ${f.goals} · streak ${f.streak}${f.bestStreak > 1 ? ` · best ${f.bestStreak}` : ''}`;
     } else if (this.tea.unlimitedMode) {
@@ -350,6 +548,8 @@ class YokusGame {
         } else if (this.state.mode === 'interact') {
           this.rig.updateLook(dt, 'interact');
           this.stops.update(dt);
+        } else if (this.state.mode === 'freeroam') {
+          this.updateFreeRoam(dt);
         } else if (this.state.mode === 'ending') {
           this.stops.update(dt);
         } else if (this.state.mode === 'final') {
@@ -396,6 +596,7 @@ class YokusGame {
       white: Number(this.state.white.toFixed(3)),
       ended: this.state.ended,
       muted: this.audio.muted,
+      music: [...this.music.current],
       tea: { ...this.tea },
       football: {
         shots: f.shots,
@@ -436,6 +637,10 @@ class YokusGame {
     n = clamp(Math.floor(Number(n) || 0), 0, 7);
     if (!this.started) this.begin();
     this.stops.resetAll();
+    this.freeroam.active = false;
+    this.freeroam.vx = 0;
+    this.freeroam.vz = 0;
+    this.freeroam.walkTarget = null;
     this.requestedStop = n;
     this.state.ended = false;
     this.state.white = 0;
@@ -525,6 +730,12 @@ class YokusGame {
       jump: (n) => this.debugJump(n),
       freekicks: () => {
         this.startUnlimitedFreeKicks();
+        this.update(0);
+        this.render();
+        return this.readState();
+      },
+      freeroam: () => {
+        this.startFreeRoam();
         this.update(0);
         this.render();
         return this.readState();

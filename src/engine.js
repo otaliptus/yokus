@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 export { RendererPipeline, CameraRig } from './pixel.js';
-import { clamp, lerp, STOP_NAMES } from './palette.js';
+import { clamp, lerp, STOP_NAMES, riverCenterZ } from './palette.js';
 
 export class InteractionSystem {
   constructor(game, canvas) {
@@ -22,12 +22,25 @@ export class InteractionSystem {
     this.pinchDist = 0;
     this.hoverDirty = false;
     this.hoverFrame = 0;
+    this.keys = new Set();
+    this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this._groundHit = new THREE.Vector3();
     this.bind(canvas);
   }
 
   isFreeLookMode() {
     const m = this.game.state.mode;
-    return m === 'walking' || m === 'approach' || m === 'arrival' || m === 'entering';
+    return m === 'walking' || m === 'approach' || m === 'arrival' || m === 'entering' || m === 'freeroam';
+  }
+
+  pickGroundPoint(x, y) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    this.pointer.set(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
+    this.game.camera.updateMatrixWorld();
+    this.ray.setFromCamera(this.pointer, this.game.camera);
+    this._groundPlane.constant = -(this.game.player?.position.y || 0);
+    return this.ray.ray.intersectPlane(this._groundPlane, this._groundHit) ? this._groundHit.clone() : null;
   }
 
   enabled(id) {
@@ -249,10 +262,21 @@ export class InteractionSystem {
         canvas.setPointerCapture?.(e.pointerId);
         return;
       }
-      // During walks/arrival, left-drag immediately looks around freely in 360°!
-      if (this.game.state.mode === 'walking' || this.game.state.mode === 'arrival' || this.game.state.mode === 'entering') {
+      // During walks/arrival (or desktop free roam), left-drag immediately looks around freely in 360°!
+      if (
+        this.game.state.mode === 'walking' ||
+        this.game.state.mode === 'arrival' ||
+        this.game.state.mode === 'entering' ||
+        (this.game.state.mode === 'freeroam' && !isTouch)
+      ) {
         this.pressed = null;
         this.draggingOrbit = true;
+        canvas.setPointerCapture?.(e.pointerId);
+        return;
+      }
+      // On touch during free roam, short tap walks there while dragging orbits 360°!
+      if (this.game.state.mode === 'freeroam' && isTouch) {
+        this.pressed = 'freeroam-tap';
         canvas.setPointerCapture?.(e.pointerId);
         return;
       }
@@ -313,7 +337,10 @@ export class InteractionSystem {
       }
 
       const wasTouch = this.touch;
-      if (this.pressed === 'football-ball') {
+      if (this.pressed === 'freeroam-tap' && (!wasTouch || wasTouch.distance < 16)) {
+        const pt = this.pickGroundPoint(e.clientX, e.clientY);
+        if (pt) this.game.setFreeRoamTarget?.(pt.x, pt.z);
+      } else if (this.pressed === 'football-ball') {
         this.game.action('shoot', { cursor: { x: e.clientX, y: e.clientY }, isTouch });
       } else if (this.pressed && (!wasTouch || wasTouch.distance < 16)) {
         this.game.action(this.pressed, { cursor: { x: e.clientX, y: e.clientY } });
@@ -350,8 +377,23 @@ export class InteractionSystem {
     });
 
     addEventListener('keydown', (e) => {
+      const low = e.key.toLowerCase();
+      this.keys.add(e.code);
+      this.keys.add(low);
+      if (
+        this.game.state.mode === 'freeroam' &&
+        (e.code.startsWith('Arrow') ||
+          e.code === 'Space' ||
+          e.code === 'KeyW' ||
+          e.code === 'KeyA' ||
+          e.code === 'KeyS' ||
+          e.code === 'KeyD')
+      ) {
+        e.preventDefault();
+        this.lastInput = this.game.time;
+      }
       const n = this.game.state.stop;
-      if (this.game.started && (e.code === 'Space' || e.key === 'Enter')) {
+      if (this.game.started && this.game.state.mode !== 'freeroam' && (e.code === 'Space' || e.key === 'Enter')) {
         if (this.game.state.mode === 'approach' && this.enabled('enter-' + n)) {
           e.preventDefault();
           this.game.action('enter-' + n);
@@ -367,7 +409,7 @@ export class InteractionSystem {
           this.game.action('leave-' + n);
         }
       }
-      if (e.key.toLowerCase() === 'm') {
+      if (low === 'm') {
         this.game.audio.toggleMute();
         document.querySelector('#mute-mark')?.classList.toggle('on', this.game.audio.muted);
       }
@@ -378,6 +420,18 @@ export class InteractionSystem {
       } else if (this.game.started && e.key === '0') {
         this.game.rig.setUserZoom(1.0);
       }
+    });
+
+    addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      this.keys.delete(e.key.toLowerCase());
+    });
+
+    addEventListener('blur', () => {
+      this.keys.clear();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.keys.clear();
     });
   }
 }
@@ -543,6 +597,24 @@ export class AudioManager {
 
   update(game) {
     if (!this.ctx) return;
+    if (game.state.mode === 'freeroam' && game.player) {
+      const p = game.player.position;
+      const rDist = Math.abs(p.z - riverCenterZ(p.x));
+      const oDist = Math.hypot(p.x - 7.2, p.z + 28.0);
+      this.amb.wind.gain.value = this.muted ? 0 : 0.024;
+      this.amb.river.gain.value = this.muted ? 0 : clamp(1 - (rDist - 3.0) / 11.0, 0, 1) * 0.095;
+      this.amb.fire.gain.value = this.muted ? 0 : clamp(1 - (oDist - 2.5) / 8.5, 0, 1) * 0.05;
+      if (game.time > this.nextCrackle && oDist < 9.5) {
+        this.nextCrackle = game.time + 0.6 + game.rng() * 1.4;
+        this.noise(0.05, 2800 + game.rng() * 1400, 0.022);
+      }
+      if (game.time > this.nextLark) {
+        this.nextLark = game.time + 8 + game.rng() * 12;
+        this.tone(1950, 0.1, 0.012, 'sine', 420);
+        this.tone(2420, 0.11, 0.01, 'sine', -260, 0.12);
+      }
+      return;
+    }
     const stop = STOP_NAMES[game.state.stop];
     this.amb.wind.gain.value = this.muted ? 0 : stop === 'readingroom' || stop === 'ending' ? 0.01 : 0.026;
     this.amb.river.gain.value = this.muted ? 0 : stop === 'river' ? 0.1 : 0;
@@ -586,7 +658,7 @@ export class MusicManager {
         const el = document.querySelector('#music-credits');
         if (el) el.textContent = this.credits.length ? 'Music · ' + this.credits.join(' · ') : '';
         this.ready = true;
-        this.setStop(STOP_NAMES[this.game.state.stop]);
+        this.setStop(this.pendingStop || (this.game.state.mode === 'freeroam' ? 'river' : STOP_NAMES[this.game.state.stop]));
       })
       .catch(() => {
         this.tracks = [];
@@ -595,6 +667,7 @@ export class MusicManager {
   }
 
   setStop(name) {
+    this.pendingStop = name;
     if (!this.ready) return;
     const matches = this.tracks.filter(
       (t) => t.use?.includes(name) || (name === 'arrival' && t.use?.includes('minibus'))

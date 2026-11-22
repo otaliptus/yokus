@@ -154,7 +154,7 @@ export class World {
     this.obstacles.push({ kind: 'circle', cx, cz, r });
   }
 
-  // True walkable surface height (terrain everywhere + smooth stone ramps & deck top across the river bridge!)
+  // True walkable surface height (terrain everywhere + smooth stone ramps & deck top across the river bridge + courtyard flagstones!)
   walkHeight(x, z) {
     const g = ground(x, z);
     const bx = -1.15;
@@ -168,7 +168,33 @@ export class World {
         return lerp(g, deckTop, t);
       }
     }
+    if (this.houseY != null && Math.abs(x) < 4.8 && z > -45.9 && z < -39.7) {
+      return Math.max(g, this.houseY + 0.06);
+    }
     return g;
+  }
+
+  // Additional solid footprints used only during post-game free roam (exterior house & village mosque)
+  resolveFreeRoamCollisions(pos, radius = 0.3) {
+    this.resolveCollisions(pos, radius);
+    const extras = [
+      { cx: 0, cz: -48.0, hw: 4.15, hd: 3.85 }, // Great-grandfather's house exterior
+      { cx: -28.6, cz: -24.5, hw: 2.85, hd: 2.9 }, // Left hillside village mosque
+    ];
+    for (const ob of extras) {
+      const dx = pos.x - ob.cx;
+      const dz = pos.z - ob.cz;
+      const ox = ob.hw + radius - Math.abs(dx);
+      const oz = ob.hd + radius - Math.abs(dz);
+      if (ox > 0 && oz > 0) {
+        if (ox < oz) pos.x += dx >= 0 ? ox : -ox;
+        else pos.z += dz >= 0 ? oz : -oz;
+      }
+    }
+    // Keep comfortably inside the 210x210 sculpted Anatolian hillside terrain!
+    pos.x = clamp(pos.x, -82, 82);
+    pos.z = clamp(pos.z, -90, 76);
+    return pos;
   }
 
   // Smoothly push a walking position clear of any registered wall, building, table, vehicle, rock, or post!
@@ -2882,7 +2908,10 @@ export class World {
       const p = clamp((game.rig.walk.time - game.rig.walk.standLead) / Math.max(0.01, game.rig.walk.duration), 0, 1);
       stopProg = lerp(fromStop, game.rig.walk.to, smooth(p));
     }
-    if (game.state.mode === 'ending' || game.state.mode === 'final') {
+    if (game.state.mode === 'freeroam' && game.player) {
+      // Gently shift afternoon sunlight as you stroll up & down the hillside (bright lower village -> golden hilltop!)
+      stopProg = clamp((36 - game.player.position.z) / 16.5, 0.5, 5.1);
+    } else if (game.state.mode === 'ending' || game.state.mode === 'final') {
       stopProg = 7;
     }
 
@@ -2945,8 +2974,12 @@ export class World {
     this.sun.position.copy(target).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
 
-    // Flickering warm orange tandır firelight (active near stop 4!)
-    const nearOven = game.state.stop === 4 || (game.rig.walk && game.state.toStop === 4);
+    // Flickering warm orange tandır firelight (active near stop 4 or when roaming near the bread courtyard!)
+    const nearOvenRoam =
+      game.state.mode === 'freeroam' &&
+      game.player &&
+      Math.hypot(game.player.position.x - 7.2, game.player.position.z + 28.0) < 13.5;
+    const nearOven = game.state.stop === 4 || nearOvenRoam || (game.rig.walk && game.state.toStop === 4);
     const flicker = 1.9 + Math.sin(this.time * 11.3) * 0.25 + Math.sin(this.time * 23.7) * 0.14;
     warmLightIntensity.value = nearOven ? flicker : 0;
   }
@@ -3090,9 +3123,13 @@ export class World {
       df.rotation.y = Math.atan2(Math.cos(this.time * 1.4 + u.phase), -Math.sin(this.time * 1.9 + u.phase));
     }
 
-    // Tea steam & visible liquid drop across 3 sips (only upload GPU steam buffer at Stop 1!)
+    // Tea steam & visible liquid drop across 3 sips (active at Stop 1 or when roaming near the tea terrace!)
     const sips = game.tea?.sips || 0;
-    const showTeaSteam = game.state.stop === 1 && sips < 3;
+    const nearTeaRoam =
+      game.state.mode === 'freeroam' &&
+      game.player &&
+      Math.hypot(game.player.position.x + 7.5, game.player.position.z - 17.5) < 16;
+    const showTeaSteam = (game.state.stop === 1 || nearTeaRoam) && sips < 3;
     this.steam.visible = showTeaSteam;
     if (showTeaSteam) {
       const sp = this.steam.geometry.attributes.position.array;
@@ -3108,10 +3145,15 @@ export class World {
     const fillRatio = clamp(game.tea?.displayFill ?? (1 - sips * 0.31), 0.06, 1);
     this.teaLiquid.scale.y = fillRatio;
 
-    // Tandır embers, fire flicker & drifting smoke (only upload GPU particle buffers near Stop 4 or final panorama!)
+    // Tandır embers, fire flicker & drifting smoke (active near Stop 4, final panorama, or roaming near the bread courtyard!)
+    const nearOvenRoamFx =
+      game.state.mode === 'freeroam' &&
+      game.player &&
+      Math.hypot(game.player.position.x - 7.2, game.player.position.z + 28.0) < 20;
     const nearOvenFx =
       game.state.stop === 4 ||
       game.state.mode === 'final' ||
+      nearOvenRoamFx ||
       (game.rig.walk && (game.state.toStop === 4 || game.rig.walk.fromStop === 4));
     if (nearOvenFx) {
       const ep = this.embers.geometry.attributes.position.array;
@@ -3223,7 +3265,11 @@ export class World {
     }
 
     // Exterior house vs interior reading room cutaway swap
-    const interior = game.state.stop >= 6 && game.state.mode !== 'final' && !(game.state.stop === 7 && game.ending.time > 14);
+    const interior =
+      game.state.mode !== 'freeroam' &&
+      game.state.stop >= 6 &&
+      game.state.mode !== 'final' &&
+      !(game.state.stop === 7 && game.ending.time > 14);
     this.reading.visible = interior;
     this.house.visible = !interior;
     for (const c of this.cats) c.visible = !interior;

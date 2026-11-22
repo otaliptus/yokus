@@ -691,6 +691,43 @@ export class CameraRig {
     }
   }
 
+  startFreeRoam(pos, yaw = 0.36) {
+    this.fixed = false;
+    this.walk = null;
+    this.freeOrbit = true;
+    this.dragEase = null;
+    this.dragYaw = 0;
+    this.dragPitch = 0;
+    this.userZoom = 1.0;
+    this.desiredUserZoom = 1.0;
+    this.desiredTarget.set(pos.x, pos.y + 0.95, pos.z);
+    this.target.copy(this.desiredTarget);
+    this.desiredYaw = yaw;
+    this.yaw = yaw;
+    this.desiredHeight = 13.8;
+    this.viewHeight = 13.8;
+    this.desiredPitch = WALK_PITCH;
+    this.pitch = WALK_PITCH;
+    this.initialized = true;
+    this.applyCamera();
+  }
+
+  updateFreeRoam(dt, pos, vx = 0, vz = 0) {
+    this.time += dt;
+    if (this.fixed || this.walk) return;
+    // Gentle camera lead in the direction of travel + responsive orbit & zoom!
+    this.desiredTarget.set(pos.x + vx * 0.22, pos.y + 0.95, pos.z + vz * 0.22);
+    const kt = ease(dt, 0.2);
+    const ky = ease(dt, 0.16);
+    const kz = ease(dt, 0.14);
+    this.target.lerp(this.desiredTarget, kt);
+    this.viewHeight = lerp(this.viewHeight, this.desiredHeight, ky);
+    this.pitch = lerp(this.pitch, this.desiredPitch, ky);
+    this.userZoom = lerp(this.userZoom, this.desiredUserZoom, kz);
+    this.yaw = easeAngle(this.yaw, this.desiredYaw + this.dragYaw, ky);
+    this.applyCamera();
+  }
+
   updateLook(dt, mode = 'interact') {
     this.time += dt;
     if (this.fixed || this.walk) return;
