@@ -422,9 +422,9 @@ export class World {
   }
 
   buildEnvironment() {
-    this.scene.fog = new THREE.Fog('#dfd0a8', 42, 145);
+    this.scene.fog = new THREE.Fog('#dfd0a8', 54, 185);
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(220, 24, 12),
+      new THREE.SphereGeometry(230, 24, 14),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         depthWrite: false,
@@ -433,17 +433,182 @@ export class World {
           top: { value: new THREE.Color('#6aa4cc') },
           horizon: { value: new THREE.Color('#e9dbb6') },
           bottom: { value: new THREE.Color('#c9a66b') },
+          shadowCol: { value: new THREE.Color('#7a85bd') },
+          sunDir: { value: new THREE.Vector3(-0.48, 0.78, 0.39) },
+          sunCol: { value: new THREE.Color('#fff4d0') },
+          camForward: { value: new THREE.Vector3(0, -0.5, -0.86) },
+          camRight: { value: new THREE.Vector3(1, 0, 0) },
+          camUp: { value: new THREE.Vector3(0, 0.86, -0.5) },
+          aspect: { value: 16 / 9 },
+          time: { value: 0 },
+          dusk: { value: 0 },
         },
-        vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        vertexShader: `
+          varying vec2 vNdc;
+          void main() {
+            vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            vNdc = clip.xy / max(0.0001, clip.w);
+            gl_Position = clip;
+          }`,
         fragmentShader: `
-          uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom; varying vec3 vP;
-          void main(){
-            float h = normalize(vP).y;
-            vec3 c = h > 0.0 ? mix(horizon, top, smoothstep(0.0, 0.65, h)) : mix(horizon, bottom, smoothstep(0.0, -0.3, h));
-            gl_FragColor = vec4(c, 1.0);
+          uniform vec3 top;
+          uniform vec3 horizon;
+          uniform vec3 bottom;
+          uniform vec3 shadowCol;
+          uniform vec3 sunDir;
+          uniform vec3 sunCol;
+          uniform vec3 camForward;
+          uniform vec3 camRight;
+          uniform vec3 camUp;
+          uniform float aspect;
+          uniform float time;
+          uniform float dusk;
+          varying vec2 vNdc;
+
+          float hash21(vec2 p) {
+            p = fract(p * vec2(123.34, 456.21));
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+          }
+
+          float vnoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = hash21(i);
+            float b = hash21(i + vec2(1.0, 0.0));
+            float c = hash21(i + vec2(0.0, 1.0));
+            float d = hash21(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+          }
+
+          float fbm(vec2 p) {
+            float s = 0.0;
+            float a = 0.52;
+            for (int i = 0; i < 4; i++) {
+              s += a * vnoise(p);
+              p = p * 2.07 + vec2(17.3, 9.1);
+              a *= 0.48;
+            }
+            return s;
+          }
+
+          void main() {
+            vec3 dir = normalize(camForward + camRight * (vNdc.x * 0.56 * aspect) + camUp * (vNdc.y * 0.56));
+            vec3 sDir = normalize(sunDir);
+            float h = dir.y;
+            float az = atan(dir.z, dir.x);
+
+            // Multi-stop Anatolian sky dome gradient
+            vec3 midSky = mix(horizon, top, 0.44);
+            vec3 c = h > 0.0
+              ? mix(mix(horizon, midSky, smoothstep(0.0, 0.22, h)), top, smoothstep(0.18, 0.72, h))
+              : mix(horizon, bottom, smoothstep(0.0, -0.26, h));
+
+            // Warm sunward horizon atmospheric glow
+            vec2 hDir = normalize(dir.xz + vec2(1e-5));
+            vec2 hSun = normalize(sDir.xz + vec2(1e-5));
+            float sunAzGlow = pow(max(0.0, dot(hDir, hSun)), 3.0);
+            float horizBand = exp(-abs(h) * 6.5);
+            c = mix(c, mix(horizon, sunCol, 0.42), horizBand * (0.28 + 0.34 * sunAzGlow));
+
+            // Luminous Anatolian sun disc & golden atmospheric corona
+            float sDot = max(0.0, dot(dir, sDir));
+            float halo = pow(sDot, 6.0) * 0.22 + pow(sDot, 36.0) * 0.42;
+            float disc = smoothstep(0.9968, 0.9980, sDot);
+            c += sunCol * halo;
+            c = mix(c, vec3(1.0, 0.99, 0.92), disc);
+
+            // Delicate pale crescent moon opposite the afternoon/dusk sun
+            vec3 mDir = normalize(vec3(-sDir.x * 0.86, max(0.36, 0.58 - sDir.y * 0.24), -sDir.z * 0.86));
+            float mDot = dot(dir, mDir);
+            float moonMask = smoothstep(0.9991, 0.99945, mDot);
+            if (moonMask > 0.01) {
+              vec3 mCut = normalize(mDir + vec3(0.014, 0.008, 0.010));
+              float crescent = moonMask * (1.0 - smoothstep(0.9991, 0.99945, dot(dir, mCut)));
+              c = mix(c, vec3(0.99, 0.97, 0.89), crescent * (0.42 + dusk * 0.55));
+            }
+
+            // Crisp twinkling twilight stars near zenith at golden hour & dusk
+            if (dusk > 0.04 && h > 0.14) {
+              vec2 cell = floor(dir.xz / (h + 0.18) * 46.0);
+              float st = hash21(cell);
+              if (st > 0.986) {
+                float tw = 0.55 + 0.45 * sin(time * 2.5 + st * 85.0);
+                c += vec3(1.0, 0.96, 0.86) * tw * dusk * smoothstep(0.14, 0.46, h) * 0.82;
+              }
+            }
+
+            // Layered high cirrus wisps & sculpted 3-tone pixel-art cumulus clouds
+            if (h > 0.02) {
+              vec2 skyUv = dir.xz / (h + 0.25);
+              float horizonFade = smoothstep(0.02, 0.14, h) * smoothstep(0.97, 0.50, h);
+
+              // High feathery cirrus streaks
+              vec2 wUv = skyUv * vec2(0.95, 2.2) + vec2(time * 0.008, time * 0.002);
+              float wispN = fbm(wUv);
+              float wisp = smoothstep(0.58, 0.78, wispN) * smoothstep(0.08, 0.24, h) * 0.26;
+              vec3 wispCol = mix(vec3(1.0, 0.97, 0.91), mix(horizon, sunCol, 0.55), dusk * 0.5);
+              c = mix(c, wispCol, wisp);
+
+              // Sculpted drifting Anatolian cumulus banks with crisp toon pixel-art puffs
+              vec2 cUv = skyUv * 1.48 + vec2(time * 0.014, time * 0.004);
+              float cn = fbm(cUv) + 0.06 * (vnoise(cUv * 5.2) - 0.5);
+              float cnSun = fbm(cUv + sDir.xz * 0.085);
+              float cloudMask = smoothstep(0.51, 0.565, cn) * horizonFade;
+              if (cloudMask > 0.01) {
+                float lit = clamp((cn - cnSun) * 3.0 + (cn - 0.50) * 1.85 + 0.34, 0.0, 1.0);
+                // Crisp 3-band toon cloud shading matching the village art style
+                float band1 = smoothstep(0.30, 0.40, lit);
+                float band2 = smoothstep(0.60, 0.70, lit);
+                vec3 cloudShadow = mix(shadowCol, horizon, 0.48);
+                vec3 cloudMid = mix(vec3(0.94, 0.90, 0.82), horizon, 0.25);
+                vec3 cloudTop = mix(vec3(1.0, 0.98, 0.91), sunCol, 0.30);
+                vec3 cloudCol = mix(cloudShadow, cloudMid, band1);
+                cloudCol = mix(cloudCol, cloudTop, band2);
+                // Warm golden silver-lining near the sun
+                float rim = (1.0 - cloudMask) * pow(sDot, 5.5) * 0.36 + pow(sDot, 12.0) * 0.16;
+                cloudCol += sunCol * rim;
+                c = mix(c, cloudCol, cloudMask * 0.93);
+              }
+            }
+
+            // Two atmospheric distant painted Anatolian mountain silhouette ranges along the horizon
+            float farRidge =
+              0.048 +
+              0.032 * sin(az * 3.0 + 0.5) +
+              0.022 * cos(az * 7.0 - 1.2) +
+              0.012 * sin(az * 13.0 + 2.1) +
+              0.005 * cos(az * 23.0);
+            if (h < farRidge) {
+              float mFar = smoothstep(farRidge, farRidge - 0.004, h);
+              vec3 farCol = mix(horizon, shadowCol, 0.34);
+              farCol = mix(horizon, farCol, smoothstep(-0.02, farRidge, h) * 0.72 + 0.28);
+              c = mix(c, farCol, mFar);
+            }
+            float nearRidge =
+              0.020 +
+              0.020 * sin(az * 4.0 + 2.2) +
+              0.014 * cos(az * 9.0 + 0.4) +
+              0.007 * sin(az * 17.0 - 0.9);
+            if (h < nearRidge) {
+              float mNear = smoothstep(nearRidge, nearRidge - 0.004, h);
+              vec3 nearCol = mix(horizon, shadowCol, 0.52);
+              // Subtle sunlit crest highlight along mountain peaks facing the sun
+              float crest = smoothstep(nearRidge - 0.012, nearRidge, h) * (0.25 + 0.55 * sunAzGlow);
+              nearCol = mix(nearCol, mix(horizon, sunCol, 0.45), crest * 0.45);
+              c = mix(c, nearCol, mNear);
+            }
+
+            gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
           }`,
       })
     );
+    this.sky.frustumCulled = false;
+    this.sky.renderOrder = -1000;
+    this.sky.userData.noNormal = true;
+    this.sky.userData.noCastShadow = true;
+    this.sky.userData.noReceivedShadow = true;
     this.scene.add(this.sky);
 
     this.sun = new THREE.DirectionalLight('#ffffff', 1.0);
@@ -3197,13 +3362,44 @@ export class World {
     midColor.set(A.midColor).lerp(tmpCol.set(B.midColor), f);
     shadowTint.set(A.shadowTint).lerp(tmpCol.set(B.shadowTint), f);
 
-    this.sky.material.uniforms.top.value.set(A.skyTop).lerp(tmpCol.set(B.skyTop), f);
-    this.sky.material.uniforms.horizon.value.set(A.skyHorizon).lerp(tmpCol.set(B.skyHorizon), f);
-    this.sky.material.uniforms.bottom.value.set(A.skyBottom).lerp(tmpCol.set(B.skyBottom), f);
+    const skyU = this.sky.material.uniforms;
+    skyU.top.value.set(A.skyTop).lerp(tmpCol.set(B.skyTop), f);
+    skyU.horizon.value.set(A.skyHorizon).lerp(tmpCol.set(B.skyHorizon), f);
+    skyU.bottom.value.set(A.skyBottom).lerp(tmpCol.set(B.skyBottom), f);
+    skyU.shadowCol.value.copy(shadowTint);
+    skyU.sunCol.value.copy(sunColor);
+    skyU.time.value = this.time;
+    skyU.dusk.value = smooth((stopProg - 4.8) / 2.2);
+    // Keep sky dome centered on camera & feed exact camera basis for true wide-angle sky view!
+    this.sky.position.copy(game.camera.position);
+    const camFwd = this._camFwd || (this._camFwd = new THREE.Vector3());
+    const camRgt = this._camRgt || (this._camRgt = new THREE.Vector3());
+    const camUp = this._camUp || (this._camUp = new THREE.Vector3());
+    game.camera.getWorldDirection(camFwd);
+    camRgt.setFromMatrixColumn(game.camera.matrixWorld, 0).normalize();
+    camUp.setFromMatrixColumn(game.camera.matrixWorld, 1).normalize();
+    const skyBias = game.rig?.skyPitchBias || 0;
+    if (skyBias > 0.0001) {
+      const cb = Math.cos(skyBias);
+      const sb = Math.sin(skyBias);
+      const fx = camFwd.x * cb + camUp.x * sb;
+      const fy = camFwd.y * cb + camUp.y * sb;
+      const fz = camFwd.z * cb + camUp.z * sb;
+      const ux = camUp.x * cb - camFwd.x * sb;
+      const uy = camUp.y * cb - camFwd.y * sb;
+      const uz = camUp.z * cb - camFwd.z * sb;
+      camFwd.set(fx, fy, fz);
+      camUp.set(ux, uy, uz);
+    }
+    skyU.camForward.value.copy(camFwd);
+    skyU.camRight.value.copy(camRgt);
+    skyU.camUp.value.copy(camUp);
+    skyU.aspect.value =
+      (game.camera.userData.pixelWidth || innerWidth) / Math.max(1, game.camera.userData.pixelHeight || innerHeight);
     this.scene.fog.color.set(A.fog).lerp(tmpCol.set(B.fog), f);
     const wide = game.state.mode === 'final';
-    this.scene.fog.near = wide ? 95 : 54;
-    this.scene.fog.far = wide ? 360 : 172;
+    this.scene.fog.near = wide ? 95 : 58;
+    this.scene.fog.far = wide ? 360 : 185;
 
     game.pipeline.setGradeWarm(
       lerp(A.gradeWarm[0], B.gradeWarm[0], f),
@@ -3230,6 +3426,7 @@ export class World {
     }
 
     sunDir.copy(this.sunOffset).normalize();
+    this.sky.material.uniforms.sunDir.value.copy(sunDir);
     sRight.copy(upAxis).cross(sunDir).normalize();
     sUp.copy(sunDir).cross(sRight).normalize();
     const texel = (extent * 2) / this.sun.shadow.mapSize.x;
@@ -3293,6 +3490,7 @@ export class World {
     for (const [i, s] of this.sheep.entries()) {
       s.rotation.x = Math.sin(this.time * 0.5 + i) * 0.015;
     }
+
     for (const b of this.birds) {
       const u = b.userData;
       const a = this.time * u.speed + u.phase;

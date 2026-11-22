@@ -257,10 +257,15 @@ export class InteractionSystem {
         this.touch = { x: e.clientX, y: e.clientY, distance: 0 };
       }
       // Right-drag gently orbits the camera anytime
+      const capturePointer = (id) => {
+        try {
+          canvas.setPointerCapture?.(id);
+        } catch {}
+      };
       if (e.button === 2) {
         this.pressed = null;
         this.draggingOrbit = true;
-        canvas.setPointerCapture?.(e.pointerId);
+        capturePointer(e.pointerId);
         return;
       }
       // During walks/arrival (or desktop free roam), left-drag immediately looks around freely in 360°!
@@ -272,20 +277,20 @@ export class InteractionSystem {
       ) {
         this.pressed = null;
         this.draggingOrbit = true;
-        canvas.setPointerCapture?.(e.pointerId);
+        capturePointer(e.pointerId);
         return;
       }
       // On touch during free roam, short tap walks there while dragging orbits 360°!
       if (this.game.state.mode === 'freeroam' && isTouch) {
         this.pressed = 'freeroam-tap';
-        canvas.setPointerCapture?.(e.pointerId);
+        capturePointer(e.pointerId);
         return;
       }
       // During the river memory, left-drag orbits smoothly (and quick click after 8s moves on!)
       if (this.game.state.stop === 3 && this.game.river.seated && !this.game.river.memoryDone) {
         this.draggingOrbit = true;
         this.memoryDown = { x: e.clientX, y: e.clientY };
-        canvas.setPointerCapture?.(e.pointerId);
+        capturePointer(e.pointerId);
         return;
       }
 
