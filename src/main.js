@@ -57,7 +57,7 @@ class YokusGame {
     });
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.OrthographicCamera(-12, 12, 7.5, -7.5, 0.1, 340);
+    this.camera = new THREE.OrthographicCamera(-12, 12, 7.5, -7.5, 0.1, 180);
     this.pipeline = new RendererPipeline(document.querySelector('#world'), this.scene, this.camera);
     this.world = new World(this.scene, this.rng);
     this.rig = new CameraRig(this.camera, this.world);

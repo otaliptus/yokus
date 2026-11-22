@@ -90,13 +90,13 @@ const OutlineGradeShader = {
         vec3 nN = normalize(texture2D(tNormal, nuv).xyz * 2.0 - 1.0);
 
         // Foreground object edge against deeper background
-        if (dN - d0 > 0.0024) {
+        if (dN - d0 > 0.0045) {
           depthEdge = true;
           if (foliageHere && !fN) foliageSilhouette = true;
         }
         // Subtle inner crease / convex bevel highlight on sun-facing edges
         float nDot = dot(n0, nN);
-        if (nDot < 0.72 && abs(dN - d0) < 0.0036) {
+        if (nDot < 0.72 && abs(dN - d0) < 0.006) {
           if (n0.y > nN.y + 0.12 || dot(n0, sunDirInView) > dot(nN, sunDirInView) + 0.14) {
             convexHighlight = true;
           }
@@ -465,7 +465,6 @@ export class CameraRig {
     this.yaw = 0.36;
     this.dragYaw = 0;
     this.dragPitch = 0;
-    this.skyPitchBias = 0;
     this.userZoom = 1.0;
     this.desiredUserZoom = 1.0;
     this.freeOrbit = false;
@@ -700,7 +699,6 @@ export class CameraRig {
     this.dragEase = null;
     this.dragYaw = 0;
     this.dragPitch = 0;
-    this.skyPitchBias = 0;
     this.userZoom = 1.0;
     this.desiredUserZoom = 1.0;
     this.desiredTarget.set(pos.x, pos.y + 0.95, pos.z);
@@ -923,17 +921,7 @@ export class CameraRig {
     this.camera.bottom = -half;
     this.camera.updateProjectionMatrix();
 
-    // Allow tilting smoothly down to a low horizon angle and gazing UP into the Anatolian sky!
-    // Keep 3D camera pitch >= +0.035 rad so terrain & village foundations NEVER backface-cull or clip underground,
-    // while lifting lookTarget.y and tilting the wide-angle sky dome upward for a sweeping upward sky gaze!
-    const rawPitch = this.pitch + this.dragPitch;
-    const effPitch = clamp(rawPitch, 0.035, 1.08);
-    const skyTilt = smooth(clamp((0.16 - rawPitch) / 0.64, 0, 1));
-    this.skyPitchBias = skyTilt * 0.54;
-    const lookTarget = this._lookTarget || (this._lookTarget = V());
-    lookTarget.copy(this.target);
-    lookTarget.y += skyTilt * 8.0;
-
+    const effPitch = clamp(this.pitch + this.dragPitch, 0.32, 1.06);
     const cp = Math.cos(effPitch);
     const sp = Math.sin(effPitch);
     this.offset.set(
@@ -941,8 +929,8 @@ export class CameraRig {
       sp * DISTANCE,
       Math.cos(this.yaw) * cp * DISTANCE
     );
-    this.camera.position.copy(lookTarget).add(this.offset);
-    this.camera.lookAt(lookTarget);
+    this.camera.position.copy(this.target).add(this.offset);
+    this.camera.lookAt(this.target);
     this.camera.updateMatrixWorld();
 
     this.right.setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
@@ -965,10 +953,10 @@ export class CameraRig {
     this.dragEase = null;
     if (free360 || this.freeOrbit) {
       this.dragYaw -= dx * 0.0065;
-      this.dragPitch = clamp(this.dragPitch + dy * 0.0048, -1.16, 0.32);
+      this.dragPitch = clamp(this.dragPitch + dy * 0.0042, -0.26, 0.28);
     } else {
       this.dragYaw = clamp(this.dragYaw - dx * 0.0055, -0.95, 0.95);
-      this.dragPitch = clamp(this.dragPitch + dy * 0.0044, -0.96, 0.24);
+      this.dragPitch = clamp(this.dragPitch + dy * 0.0036, -0.18, 0.2);
     }
   }
 
@@ -981,7 +969,6 @@ export class CameraRig {
   setFixed(pos, target, viewHeight = null) {
     this.fixed = true;
     this.walk = null;
-    this.skyPitchBias = 0;
     this._fixedPos = pos.clone();
     this._fixedTarget = target.clone();
     if (viewHeight) {
