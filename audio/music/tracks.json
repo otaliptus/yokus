@@ -1,44 +1,10 @@
 [
-  {
-    "file": "01-uzun-ince-bir-yoldayim.mp3",
-    "use": ["arrival", "minibus"],
-    "volume": 0.44,
-    "credit": "\"Uzun İnce Bir Yoldayım (Instrumental)\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "02-teahouse-classical.mp3",
-    "use": ["teahouse"],
-    "volume": 0.40,
-    "credit": "\"Turkish Classical\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "03-football-oud.mp3",
-    "use": ["football"],
-    "volume": 0.40,
-    "credit": "\"Turkish Elegance\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "04-river-oud.mp3",
-    "use": ["river"],
-    "volume": 0.40,
-    "credit": "\"Cultural Tapestry\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "05-courtyard-saz.mp3",
-    "use": ["bread", "house"],
-    "volume": 0.40,
-    "credit": "\"Heritage Echoes\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "06-readingroom-ney.mp3",
-    "use": ["readingroom"],
-    "volume": 0.42,
-    "credit": "\"Mesmerizing Turkish Instrumental\" via Internet Archive Turkish Instrumental Music (CC0)"
-  },
-  {
-    "file": "07-ending-keman.mp3",
-    "use": ["ending"],
-    "volume": 0.46,
-    "credit": "\"Yeniden Doğuş\" via Internet Archive Turkish Instrumental Music (CC0)"
-  }
+  { "file": "arrival-desert-caravan.ogg", "use": ["arrival"], "credit": "\"Desert theme\" by yd (OpenGameArt, CC0)" },
+  { "file": "teahouse-peshrev-1912.mp3", "use": ["teahouse"], "diegetic": "an old radio or gramophone inside the tea house, positional, crackly, quiet", "credit": "\"Husseini pashrav\", M. G. Parsekian and Company, 1912 recording (Internet Archive, Public Domain Mark)" },
+  { "file": "teahouse-turkish-medley-1916.mp3", "use": ["minibus"], "diegetic": "the minibus radio at arrival, tinny, fading as the minibus leaves", "credit": "\"Medley of Turkish melodies\", Max Yussim and Joseph Moskowitz, 1916 (Library of Congress National Jukebox via Internet Archive, Public Domain Mark)" },
+  { "file": "football-childhood-road.mp3", "use": ["football"], "credit": "\"The road we use to travel when we were kids\" by Komiku (OpenGameArt, CC0)" },
+  { "file": "river-down-the-river.mp3", "use": ["river"], "credit": "\"Down The River\" by Komiku (OpenGameArt, CC0)" },
+  { "file": "bread-apple-cider.ogg", "use": ["bread", "house"], "credit": "\"Apple Cider\" by Zane Little (OpenGameArt, CC0)" },
+  { "file": "readingroom-harp.ogg", "use": ["readingroom"], "credit": "\"Meadow Thoughts\" by Écrivain (OpenGameArt, CC0)" },
+  { "file": "ending-dreaming-guitar.mp3", "use": ["ending"], "credit": "\"Dreaming of you\" by Komiku (OpenGameArt, CC0)" }
 ]
