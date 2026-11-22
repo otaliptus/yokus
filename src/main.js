@@ -96,7 +96,12 @@ class YokusGame {
     this.freeroam = {
       active: false,
       vx: 0,
+      vy: 0,
       vz: 0,
+      grounded: true,
+      inWater: false,
+      seated: null,
+      nearSeat: null,
       walkTarget: null,
       stepPuffAt: 0,
     };
@@ -179,9 +184,15 @@ class YokusGame {
     this.stops.resetAll();
     this.freeroam.active = false;
     this.freeroam.vx = 0;
+    this.freeroam.vy = 0;
     this.freeroam.vz = 0;
+    this.freeroam.grounded = true;
+    this.freeroam.inWater = false;
+    this.freeroam.seated = null;
+    this.freeroam.nearSeat = null;
     this.freeroam.walkTarget = null;
     this.interactions.keys?.clear();
+    this.player.scale.setScalar(1);
     this.state.ended = false;
     this.state.white = 0;
     this.state.memory = false;
@@ -322,6 +333,7 @@ class YokusGame {
     const startX = 0.0;
     const startZ = -38.6;
     this.player.visible = true;
+    this.player.scale.setScalar(1);
     this.player.position.set(startX, w.walkHeight(startX, startZ), startZ);
     this.player.userData.action = 'idle';
     this.player.userData.actionUntil = 0;
@@ -331,7 +343,12 @@ class YokusGame {
 
     this.freeroam.active = true;
     this.freeroam.vx = 0;
+    this.freeroam.vy = 0;
     this.freeroam.vz = 0;
+    this.freeroam.grounded = true;
+    this.freeroam.inWater = false;
+    this.freeroam.seated = null;
+    this.freeroam.nearSeat = null;
     this.freeroam.walkTarget = null;
     this.freeroam.stepPuffAt = 0;
     this.interactions.keys?.clear();
@@ -347,7 +364,82 @@ class YokusGame {
 
   setFreeRoamTarget(x, z) {
     if (this.state.mode !== 'freeroam') return;
+    if (this.freeroam.seated) this.standFromFreeRoamSeat();
+    // On mobile tap near a balcony/lookout chair, sit right down if close enough!
+    if (this.freeroam.nearSeat && Math.hypot(x - this.freeroam.nearSeat.pos.x, z - this.freeroam.nearSeat.pos.z) < 1.2) {
+      this.toggleFreeRoamSit();
+      return;
+    }
     this.freeroam.walkTarget = V(clamp(x, -82, 82), 0, clamp(z, -90, 76));
+  }
+
+  triggerFreeRoamJump() {
+    if (this.state.mode !== 'freeroam') return;
+    const fr = this.freeroam;
+    if (fr.seated) {
+      this.standFromFreeRoamSeat();
+      return;
+    }
+    if (!fr.grounded) return;
+    fr.vy = 6.9;
+    fr.grounded = false;
+    setPose(this.player, 'jump');
+    if (fr.inWater) {
+      this.audio.sfx('splash');
+      this.world.spawnPuff(V(this.player.position.x, this.player.position.y + 0.15, this.player.position.z), 12, '#eef6fa');
+    } else {
+      this.audio.sfx('thump');
+      this.world.spawnPuff(V(this.player.position.x, this.player.position.y + 0.05, this.player.position.z), 6, '#e4c386');
+    }
+  }
+
+  standFromFreeRoamSeat() {
+    const fr = this.freeroam;
+    if (!fr.seated) return;
+    const seat = fr.seated;
+    fr.seated = null;
+    this.player.position.copy(seat.standPos);
+    fr.vy = 0;
+    fr.grounded = true;
+    setPose(this.player, 'stand');
+    this.updateModeHud();
+  }
+
+  toggleFreeRoamSit() {
+    if (this.state.mode !== 'freeroam') return;
+    const fr = this.freeroam;
+    if (fr.seated) {
+      this.standFromFreeRoamSeat();
+      return;
+    }
+    const seat = this.findNearestRoamSeat();
+    if (!seat) return;
+    fr.seated = seat;
+    fr.vx = 0;
+    fr.vy = 0;
+    fr.vz = 0;
+    fr.grounded = true;
+    fr.walkTarget = null;
+    this.player.position.copy(seat.pos);
+    setPose(this.player, 'sit');
+    faceFigure(this.player, seat.lookAt);
+    this.audio.sfx('thump');
+    this.updateModeHud();
+  }
+
+  findNearestRoamSeat() {
+    const seats = this.world.roamSeats || [];
+    const p = this.player.position;
+    let best = null;
+    let bestD = 1.45;
+    for (const s of seats) {
+      const d = Math.hypot(p.x - s.pos.x, p.z - s.pos.z);
+      if (d < bestD && Math.abs(p.y - s.pos.y) < 1.1) {
+        bestD = d;
+        best = s;
+      }
+    }
+    return best;
   }
 
   updateFreeRoam(dt) {
@@ -360,6 +452,19 @@ class YokusGame {
     if (keys.has('KeyD') || keys.has('ArrowRight') || keys.has('d')) inRight += 1;
     if (keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('a')) inRight -= 1;
     const jogging = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('shift');
+
+    // If seated on a balcony/lookout chair, stay cozy watching the village until WASD / Space / E stands up!
+    if (fr.seated) {
+      if (inFwd !== 0 || inRight !== 0) {
+        this.standFromFreeRoamSeat();
+      } else {
+        this.player.position.copy(fr.seated.pos);
+        if (this.player.userData.pose !== 'sit') setPose(this.player, 'sit');
+        faceFigureSmooth(this.player, fr.seated.lookAt, dt, 8);
+        this.rig.updateFreeRoam(dt, this.player.position, 0, 0, true);
+        return;
+      }
+    }
 
     let dirX = 0;
     let dirZ = 0;
@@ -394,35 +499,87 @@ class YokusGame {
     fr.vx = lerp(fr.vx, dirX * wantSpeed, accel);
     fr.vz = lerp(fr.vz, dirZ * wantSpeed, accel);
 
+    const pos = this.player.position;
     const spd = Math.hypot(fr.vx, fr.vz);
     if (spd > 0.08) {
-      const pos = this.player.position;
       pos.x += fr.vx * dt;
       pos.z += fr.vz * dt;
-      this.world.resolveFreeRoamCollisions(pos, 0.3);
-      pos.y = this.world.walkHeight(pos.x, pos.z);
+      this.world.resolveFreeRoamCollisions(pos, 0.3, pos.y);
+      faceFigureSmooth(this.player, V(pos.x + fr.vx, pos.y, pos.z + fr.vz), dt, 12);
+    } else {
+      fr.vx = 0;
+      fr.vz = 0;
+    }
+
+    // Vertical physics: smooth jumping, gravity, stepping onto climbable rocks, external stairs & balconies!
+    const surfY = this.world.walkHeight(pos.x, pos.z, pos.y);
+    const wasGrounded = fr.grounded;
+    if (!fr.grounded || pos.y > surfY + 0.06) {
+      fr.vy -= 19.5 * dt;
+      pos.y += fr.vy * dt;
+      const landSurf = this.world.walkHeight(pos.x, pos.z, pos.y);
+      if (pos.y <= landSurf) {
+        pos.y = landSurf;
+        const impact = Math.abs(fr.vy);
+        fr.vy = 0;
+        fr.grounded = true;
+        if (!wasGrounded && impact > 2.2) {
+          const wadingLand = isInRiver(pos.x, pos.z, -0.2) && pos.y < ground(pos.x, pos.z) + 0.3 && Math.abs(pos.x + 1.15) > 2.25;
+          if (wadingLand) {
+            this.audio.sfx('splash');
+            this.world.spawnPuff(V(pos.x, pos.y + 0.16, pos.z), 16, '#eef6fa');
+          } else {
+            this.audio.sfx('thump');
+            this.world.spawnPuff(V(pos.x, pos.y + 0.05, pos.z), 8, '#e4c386');
+          }
+        }
+      } else {
+        fr.grounded = false;
+      }
+    } else {
+      pos.y = surfY;
+      fr.vy = 0;
+      fr.grounded = true;
+    }
+
+    // Water entry splash + wading step splash SFX (only when in river water, NOT on the stone bridge or stepping rocks!)
+    const onDryHigh = pos.y > ground(pos.x, pos.z) + 0.22;
+    const wading = fr.grounded && !onDryHigh && isInRiver(pos.x, pos.z, -0.2) && Math.abs(pos.x + 1.15) > 2.25;
+    if (wading && !fr.inWater) {
+      this.audio.sfx('splash');
+      this.world.spawnPuff(V(pos.x, pos.y + 0.15, pos.z), 16, '#eef6fa');
+      fr.stepPuffAt = this.time + 0.32;
+    }
+    fr.inWater = wading;
+
+    // Character animation pose
+    if (!fr.grounded) {
+      if (this.player.userData.pose !== 'jump') setPose(this.player, 'jump');
+    } else if (spd > 0.08) {
       const pose = spd > 4.6 ? 'jog' : 'walk';
       if (this.player.userData.pose !== pose) setPose(this.player, pose);
-      faceFigureSmooth(this.player, V(pos.x + fr.vx, pos.y, pos.z + fr.vz), dt, 12);
-
-      // Gentle splash puffs when wading across the shallow stream (off the stone bridge), or sunlit dust when jogging!
-      const wading = isInRiver(pos.x, pos.z, -0.2) && Math.abs(pos.x + 1.15) > 2.25;
       if (this.time > fr.stepPuffAt) {
         if (wading) {
-          fr.stepPuffAt = this.time + 0.28;
-          this.world.spawnPuff(V(pos.x, pos.y + 0.14, pos.z), 7, '#eef6fa');
+          fr.stepPuffAt = this.time + 0.36;
+          this.audio.sfx('wade');
+          this.world.spawnPuff(V(pos.x, pos.y + 0.14, pos.z), 8, '#eef6fa');
         } else if (pose === 'jog') {
           fr.stepPuffAt = this.time + 0.34;
           this.world.spawnPuff(V(pos.x, pos.y + 0.06, pos.z), 5, '#e4c386');
         }
       }
-    } else {
-      fr.vx = 0;
-      fr.vz = 0;
-      if (this.player.userData.pose !== 'stand') setPose(this.player, 'stand');
+    } else if (this.player.userData.pose !== 'stand') {
+      setPose(this.player, 'stand');
     }
 
-    this.rig.updateFreeRoam(dt, this.player.position, fr.vx, fr.vz);
+    // Refresh HUD prompt cleanly whenever entering/leaving reach of a balcony or lookout chair!
+    const nearSeat = this.findNearestRoamSeat();
+    if (nearSeat !== fr.nearSeat) {
+      fr.nearSeat = nearSeat;
+      this.updateModeHud();
+    }
+
+    this.rig.updateFreeRoam(dt, this.player.position, fr.vx, fr.vz, false);
   }
 
   returnToDuskPanorama() {
@@ -431,7 +588,12 @@ class YokusGame {
     this.bread.unlimitedMode = false;
     this.freeroam.active = false;
     this.freeroam.vx = 0;
+    this.freeroam.vy = 0;
     this.freeroam.vz = 0;
+    this.freeroam.grounded = true;
+    this.freeroam.inWater = false;
+    this.freeroam.seated = null;
+    this.freeroam.nearSeat = null;
     this.freeroam.walkTarget = null;
     this.interactions.keys?.clear();
     this.rig.setUserZoom(1.0);
@@ -449,7 +611,17 @@ class YokusGame {
   updateModeHud() {
     if (!this.ui.fkScore) return;
     if (this.state.mode === 'freeroam') {
-      this.ui.fkScore.textContent = IS_MOBILE ? 'tap to walk · drag to look' : 'wasd to roam · shift jog · drag look';
+      if (this.freeroam.seated) {
+        this.ui.fkScore.textContent = 'sitting & watching · wasd or e to stand · drag look';
+      } else if (this.freeroam.nearSeat) {
+        this.ui.fkScore.textContent = IS_MOBILE
+          ? 'tap chair to sit & watch · drag look'
+          : 'press e to sit & watch · space jump · drag look';
+      } else {
+        this.ui.fkScore.textContent = IS_MOBILE
+          ? 'tap to walk · drag to look'
+          : 'wasd roam · space jump · shift jog · drag look';
+      }
     } else if (this.football.unlimitedMode) {
       const f = this.football;
       this.ui.fkScore.textContent = `goals ${f.goals} · streak ${f.streak}${f.bestStreak > 1 ? ` · best ${f.bestStreak}` : ''}`;
@@ -625,6 +797,14 @@ class YokusGame {
       ending: { ...this.ending },
       hint: this.stops.hint(),
       canLeave: Array.from({ length: 4 }, (_, i) => this.stops.canLeave(i + 1)),
+      freeroam: {
+        active: this.freeroam.active,
+        grounded: this.freeroam.grounded,
+        inWater: this.freeroam.inWater,
+        seated: !!this.freeroam.seated,
+        nearSeat: this.freeroam.nearSeat?.label || null,
+        seatsCount: this.world.roamSeats?.length || 0,
+      },
       playerPos: this.player.position.toArray().map((n) => Number(n.toFixed(2))),
       dragYaw: Number(this.rig.dragYaw.toFixed(3)),
       dragPitch: Number(this.rig.dragPitch.toFixed(3)),
@@ -639,8 +819,14 @@ class YokusGame {
     this.stops.resetAll();
     this.freeroam.active = false;
     this.freeroam.vx = 0;
+    this.freeroam.vy = 0;
     this.freeroam.vz = 0;
+    this.freeroam.grounded = true;
+    this.freeroam.inWater = false;
+    this.freeroam.seated = null;
+    this.freeroam.nearSeat = null;
     this.freeroam.walkTarget = null;
+    this.player.scale.setScalar(1);
     this.requestedStop = n;
     this.state.ended = false;
     this.state.white = 0;
@@ -736,6 +922,24 @@ class YokusGame {
       },
       freeroam: () => {
         this.startFreeRoam();
+        this.update(0);
+        this.render();
+        return this.readState();
+      },
+      roamSeats: () =>
+        (this.world.roamSeats || []).map((s) => ({
+          label: s.label,
+          pos: s.pos.toArray().map((n) => Number(n.toFixed(2))),
+          standPos: s.standPos.toArray().map((n) => Number(n.toFixed(2))),
+        })),
+      teleportRoam: (x, z, y = null) => {
+        if (this.state.mode !== 'freeroam') this.startFreeRoam();
+        const py = y != null ? y : this.world.walkHeight(x, z, this.player.position.y + 3);
+        this.player.position.set(x, py, z);
+        this.freeroam.vy = 0;
+        this.freeroam.grounded = true;
+        this.rig.target.set(x, py + 0.95, z);
+        this.rig.desiredTarget.copy(this.rig.target);
         this.update(0);
         this.render();
         return this.readState();

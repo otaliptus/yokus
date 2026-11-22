@@ -712,12 +712,13 @@ export class CameraRig {
     this.applyCamera();
   }
 
-  updateFreeRoam(dt, pos, vx = 0, vz = 0) {
+  updateFreeRoam(dt, pos, vx = 0, vz = 0, seated = false) {
     this.time += dt;
     if (this.fixed || this.walk) return;
-    // Gentle camera lead in the direction of travel + responsive orbit & zoom!
-    this.desiredTarget.set(pos.x + vx * 0.22, pos.y + 0.95, pos.z + vz * 0.22);
-    const kt = ease(dt, 0.2);
+    // Gentle camera lead in the direction of travel + scenic wider framing when seated on a balcony lookout chair!
+    this.desiredHeight = seated ? 16.4 : 13.8;
+    this.desiredTarget.set(pos.x + vx * 0.22, pos.y + (seated ? 1.05 : 0.95), pos.z + vz * 0.22);
+    const kt = ease(dt, seated ? 0.36 : 0.2);
     const ky = ease(dt, 0.16);
     const kz = ease(dt, 0.14);
     this.target.lerp(this.desiredTarget, kt);

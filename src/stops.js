@@ -173,6 +173,7 @@ export class StopDirector {
     g.state.memory = false;
     g.state.memoryStrength = 1;
     g.state.white = 0;
+    g.player.scale.setScalar(1);
     g.ui.memory.classList.remove('on');
     g.ui.ending.classList.remove('visible');
     g.ui.endActions?.classList.remove('visible');
@@ -352,10 +353,12 @@ export class StopDirector {
       g.player.userData.action = 'read';
       g.player.userData.actionUntil = Infinity;
 
-      w.dede.visible = true;
-      w.dede.position.set(-3.1, w.houseY + 0.18, -46.5);
-      setPose(w.dede, 'walk');
-      faceFigure(w.dede, V(0, w.houseY, -46.4));
+      w.dede.visible = false;
+      w.dede.position.set(-1.28, w.houseY + 0.18, -44.15);
+      setPose(w.dede, 'walk', true);
+      w.dede.userData.action = 'idle';
+      w.dede.userData.actionUntil = 0;
+      faceFigure(w.dede, V(-0.74, w.houseY + 0.18, -46.06));
       g.rig.fixed = true;
     }
 
@@ -399,7 +402,6 @@ export class StopDirector {
       if (id === 'npc-aunt') return g.bread.handedOver && !g.bread.refilling && g.bread.memoryTime <= 0 && g.bread.biteAnim <= 0 && !g.bread.hug;
     }
     if (n === 5) {
-      if (id === 'cat-0') return false;
       if (id === 'cat-2') return !g.house.opening && !g.house.whiteCatFled;
       if (id.startsWith('cat-')) return !g.house.opening;
       if (id === 'blue-door') return !g.house.opening && Object.keys(g.house.petted).length > 0;
@@ -415,7 +417,7 @@ export class StopDirector {
     const g = this.game;
     if (n === 1) return !g.tea.unlimitedMode && g.tea.firstGlass && g.tea.stage === 'idle';
     if (n === 2) return !g.football.unlimitedMode && g.football.afterMemory && (g.football.phase === 'aim' || g.football.phase === 'reset');
-    if (n === 3) return g.river.memoryDone && !g.river.holdingFish && !g.river.droppingFish;
+    if (n === 3) return g.river.memoryDone && g.river.caught >= 1 && !g.river.holdingFish && !g.river.droppingFish;
     if (n === 4) return !g.bread.unlimitedMode && g.bread.bites >= 3 && g.bread.memoryTime <= 0 && !g.bread.hug;
     return false;
   }
@@ -703,7 +705,7 @@ export class StopDirector {
         const catId = id === 'pet-start' ? opts.id : id;
         const idx = Number(catId?.split('-')[1]) || 0;
         const cat = w.cats[idx];
-        if (!cat || cat.userData.angry) return;
+        if (!cat) return;
         if (idx === 2 && g.house.whiteCatFled) return;
         w.popInteractable(catId);
 
@@ -740,13 +742,14 @@ export class StopDirector {
         g.house.petStart = g.time;
         g.house.nextPurrAt = g.time + 2.6;
         g.house.petted[catId] = true;
-        cat.userData.pet = 1;
         // Walk cleanly to the SIDE of each cat so the camera sees the player sitting & stroking in clear side profile!
         const petOffset = idx === 0 ? V(0.76, 0, 0.14) : V(-0.76, 0, 0.14);
         const petSpot = cat.position.clone().add(petOffset);
         petSpot.y = w.houseY + 0.08;
         const dist = g.player.position.distanceTo(petSpot);
         if (dist > 0.25) {
+          // Grumpy black cat waits to whip its tail until you actually reach and pet it!
+          if (!cat.userData.angry) cat.userData.pet = 1;
           g.house.walkTo = {
             kind: 'cat',
             catId,
@@ -759,10 +762,13 @@ export class StopDirector {
           setPose(g.player, 'walk');
         } else {
           g.house.walkTo = null;
+          cat.userData.pet = 1;
           setPose(g.player, 'sit-pet');
         }
-        w.spawnPuff(cat.position.clone().add(V(0, 0.45, 0)), 10, '#ffe49e');
-        g.audio.sfx('purr');
+        if (!cat.userData.angry) {
+          w.spawnPuff(cat.position.clone().add(V(0, 0.45, 0)), 10, '#ffe49e');
+          g.audio.sfx('purr');
+        }
         return;
       }
       if (id === 'blue-door' && !g.house.opening && Object.keys(g.house.petted).length > 0) {
@@ -1074,6 +1080,13 @@ export class StopDirector {
     const w = g.world;
     const f = g.football;
     f.phase = 'memory';
+    f.lapRunner = null;
+    w.pitchKids.forEach((k) => {
+      if (k.userData.homePos) k.position.copy(k.userData.homePos);
+      setPose(k, 'stand', true);
+      k.userData.action = 'idle';
+      k.userData.actionUntil = 0;
+    });
     f.memoryTime = 0;
     f.memoryKicked = false;
     f.memoryWallJumped = false;
@@ -1426,6 +1439,8 @@ export class StopDirector {
             this.triggerWhiteCatFlee();
           } else if (wt.kind === 'cat') {
             h.walkTo = null;
+            const reachedCat = w.cats[Number(wt.catId?.split('-')[1])];
+            if (reachedCat) reachedCat.userData.pet = 1;
             setPose(g.player, h.petting ? 'sit-pet' : 'stand');
           } else if (wt.kind === 'door') {
             h.walkTo = null;
@@ -1438,14 +1453,17 @@ export class StopDirector {
       } else if (h.petting) {
         const cat = w.cats[Number(h.petting.split('-')[1])];
         if (cat) {
+          cat.userData.pet = 1;
           if (g.player.userData.pose !== 'sit-pet') setPose(g.player, 'sit-pet');
           faceFigureSmooth(g.player, cat.position, dt, 10);
-          if (g.time >= h.nextPurrAt) {
-            h.nextPurrAt = g.time + 2.8;
-            g.audio.sfx('purr');
-          }
-          if (Math.floor(g.time * 1.5) !== Math.floor((g.time - dt) * 1.5)) {
-            w.spawnPuff(cat.position.clone().add(V(0, 0.45, 0)), 4, '#ffe8a2');
+          if (!cat.userData.angry) {
+            if (g.time >= h.nextPurrAt) {
+              h.nextPurrAt = g.time + 2.8;
+              g.audio.sfx('purr');
+            }
+            if (Math.floor(g.time * 1.5) !== Math.floor((g.time - dt) * 1.5)) {
+              w.spawnPuff(cat.position.clone().add(V(0, 0.45, 0)), 4, '#ffe8a2');
+            }
           }
         }
       }
@@ -1998,14 +2016,15 @@ export class StopDirector {
     const gy = w.goal.position.y;
     const gz = w.goal.position.z;
 
-    // Keep celebrating pitch kid running 2 full joyful airplane-arms laps around the pitch!
+    // Keep celebrating pitch kid running AT MOST 2 joyful airplane-arms laps per goal!
     if (f.lapRunner && f.phase !== 'memory') {
       const lr = f.lapRunner;
       lr.time += dt;
       const p = clamp(lr.time / lr.duration, 0, 1);
       const kid = lr.kid;
       if (p < 1) {
-        const u = (p * lr.laps) % 1;
+        const u = ((lr.startU || 0) + p * lr.laps) % 1;
+        lr.currentU = u;
         const pos = lr.loop.getPointAt(u);
         const ahead = lr.loop.getPointAt((u + 0.02) % 1);
         kid.position.copy(pos);
@@ -2336,7 +2355,7 @@ export class StopDirector {
           V(gx + 0.85, fy, 1.85),
         ];
         w.memoryKids.forEach((k, i) => {
-          if (i === 1) {
+          if (i === 1 && celebT / 4.2 < 2.0) {
             const loop = this.getPitchLoop();
             const u = ((celebT / 4.2) % 1 + 1) % 1;
             const pos = loop.getPointAt(u);
@@ -2534,6 +2553,7 @@ export class StopDirector {
         r.rippleTime = 0;
         w.rippleRing.position.set(end.x, w.riverY + 0.03, end.z);
         w.rippleRing.visible = true;
+        w.spawnPuff(end, 10, '#eef8fc');
         g.audio.sfx('splash');
       }
     } else if (r.fishing === 'waiting') {
@@ -2582,19 +2602,29 @@ export class StopDirector {
     }
   }
 
-  // STOP 7: THE ENDING — dissolve to child, Dede walks in & sits, dusk village rise, cloud-out!
+  // STOP 7: THE ENDING — player shrinks cleanly into childhood self BEFORE Dede appears,
+  // Dede walks around clearly to front of his armchair holding his book & sits neatly to read beside you!
   updateEnding(dt) {
     const g = this.game;
     const w = g.world;
     const t = (g.ending.time += dt);
     const y = w.houseY;
 
-    // 1.8s: Golden sparkle dissolve from adult into childhood self!
-    if (t >= 1.8 && !g.ending.dissolved) {
-      g.ending.dissolved = true;
-      w.selfChild.visible = true;
-      g.player.visible = false;
-      w.spawnPuff(w.selfChild.position.clone().add(V(0, 0.55, 0)), 28, '#ffea9e');
+    // 0.55..1.9s: Gently shrink adult player down into small child self BEFORE Dede appears!
+    if (!g.ending.dissolved) {
+      if (t >= 0.55 && t < 1.9) {
+        const sp = smooth((t - 0.55) / 1.35);
+        g.player.scale.setScalar(lerp(1.0, 0.58, sp));
+        if (Math.floor(t * 7) !== Math.floor((t - dt) * 7)) {
+          w.spawnPuff(g.player.position.clone().add(V(0, 0.55, 0)), 6, '#ffea9e');
+        }
+      } else if (t >= 1.9) {
+        g.ending.dissolved = true;
+        g.player.scale.setScalar(1);
+        w.selfChild.visible = true;
+        g.player.visible = false;
+        w.spawnPuff(w.selfChild.position.clone().add(V(0, 0.52, 0)), 26, '#ffea9e');
+      }
     }
 
     const closePos = V(4.2, y + 12.5, -34.5);
@@ -2612,23 +2642,58 @@ export class StopDirector {
       g.rig.viewHeight = 5.6;
     }
 
-    // Dede walks quietly in from the left (2.6s..8.5s) and sits comfortably inside his carved heirloom armchair!
-    const chairPos = w.dedeChairPos || V(-1.38, y + 0.18, -46.22);
-    const chairFront = V(chairPos.x + 0.26, y + 0.18, chairPos.z + 0.52);
-    if (t < 7.2) {
-      const p = smooth(clamp((t - 2.6) / 4.6, 0, 1));
-      w.dede.position.set(lerp(-3.2, chairFront.x, p), y + 0.18, lerp(-45.75, chairFront.z, p));
-      setPose(w.dede, p > 0.01 && p < 0.98 ? 'walk' : 'stand');
-      faceFigureSmooth(w.dede, p < 0.85 ? chairFront : chairPos, dt, 8);
-    } else if (t < 8.5) {
-      const p = smooth((t - 7.2) / 1.3);
-      w.dede.position.copy(chairFront).lerp(chairPos, p);
-      setPose(w.dede, p < 0.55 ? 'walk' : 'sit');
-      faceFigureSmooth(w.dede, w.openBook.position, dt, 8);
+    // Dede appears AFTER you have become small (t >= 2.55s), walks along an unobstructed front path
+    // to directly in front of his armchair, turns toward you, sits neatly onto the cushion & opens his book!
+    const chairPos = w.dedeChairPos || V(-1.58, y + 0.3, -45.92);
+    const chairYaw = w.dedeChairYaw ?? 1.72;
+    const chairFront = V(
+      chairPos.x + Math.sin(chairYaw) * 0.84,
+      y + 0.18,
+      chairPos.z + Math.cos(chairYaw) * 0.84
+    );
+    const entryStart = V(-1.28, y + 0.18, -44.15);
+    const lookTarget = V(
+      chairPos.x + Math.sin(chairYaw) * 4.0,
+      y + 0.3,
+      chairPos.z + Math.cos(chairYaw) * 4.0
+    );
+
+    if (t < 2.55) {
+      w.dede.visible = false;
+    } else if (t < 5.85) {
+      w.dede.visible = true;
+      const p = smooth(clamp((t - 2.55) / 3.3, 0, 1));
+      w.dede.position.copy(entryStart).lerp(chairFront, p);
+      setPose(w.dede, p < 0.96 ? 'walk' : 'stand');
+      w.dede.userData.action = 'idle';
+      w.dede.userData.actionUntil = 0;
+      faceFigureSmooth(w.dede, p < 0.84 ? chairFront : lookTarget, dt, 7);
+    } else if (t < 6.85) {
+      // Turn gracefully in front of the armchair to face child-you & the golden sunbeam before sitting!
+      w.dede.visible = true;
+      w.dede.position.copy(chairFront);
+      setPose(w.dede, 'stand');
+      faceFigureSmooth(w.dede, lookTarget, dt, 8);
+    } else if (t < 8.15) {
+      // Ease smoothly back onto the burgundy cushion while sitting down (ZERO armrest/backrest clipping!)
+      w.dede.visible = true;
+      const p = smooth((t - 6.85) / 1.3);
+      w.dede.position.set(
+        lerp(chairFront.x, chairPos.x, p),
+        lerp(y + 0.18, chairPos.y, p),
+        lerp(chairFront.z, chairPos.z, p)
+      );
+      setPose(w.dede, p < 0.32 ? 'stand' : 'sit');
+      faceFigureSmooth(w.dede, lookTarget, dt, 10);
+      if (p >= 0.65) {
+        w.dede.userData.action = 'read';
+        w.dede.userData.actionUntil = Infinity;
+      }
     } else {
+      w.dede.visible = true;
       setPose(w.dede, 'sit');
       w.dede.position.copy(chairPos);
-      faceFigureSmooth(w.dede, w.openBook.position, dt, 6);
+      faceFigureSmooth(w.dede, lookTarget, dt, 8);
       w.dede.userData.action = 'read';
       w.dede.userData.actionUntil = Infinity;
     }
@@ -2807,11 +2872,15 @@ export class StopDirector {
     const g = this.game;
     const kid = g.world.pitchKids?.[1];
     if (!kid) return;
+    const existing = g.football.lapRunner;
+    // Cap strictly to AT MOST 2 laps per goal (if already mid-lap from an earlier goal, continue smoothly for at most 2 laps without teleporting!)
     g.football.lapRunner = {
       kid,
       loop: this.getPitchLoop(),
+      startU: existing ? existing.currentU || 0 : 0,
+      currentU: existing ? existing.currentU || 0 : 0,
       time: 0,
-      duration: 12.6, // Brisk joyous 2-lap sprint around the entire pitch!
+      duration: 11.2,
       laps: 2,
     };
   }
@@ -2919,9 +2988,12 @@ export class StopDirector {
       g.ending.dissolved = true;
       w.selfChild.visible = true;
       g.player.visible = false;
-      w.dede.position.set(-0.92, w.houseY + 0.34, -46.5);
+      w.dede.visible = true;
+      const cp = w.dedeChairPos || V(-1.58, w.houseY + 0.3, -45.92);
+      const cy = w.dedeChairYaw ?? 1.72;
+      w.dede.position.copy(cp);
       setPose(w.dede, 'sit', true);
-      faceFigure(w.dede, w.openBook.position);
+      faceFigure(w.dede, V(cp.x + Math.sin(cy) * 4, cp.y, cp.z + Math.cos(cy) * 4));
       w.dede.userData.action = 'read';
       w.dede.userData.actionUntil = Infinity;
     }

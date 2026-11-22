@@ -30,6 +30,7 @@ export function makeFigure({
   child = false,
   apron = false,
   cane = false,
+  book = false,
   beads = false,
   tray = false,
   seed = 0,
@@ -352,6 +353,35 @@ export function makeFigure({
     body.add(caneRest);
   }
 
+  // Optional hardcover book (carried in left hand while walking; open illustrated book held in both hands while seated!)
+  let carryBook = null;
+  let readBook = null;
+  if (book) {
+    carryBook = new THREE.Group();
+    place(box(0.065 * s, 0.28 * s, 0.21 * s, C.kilimRed), 0.02 * s, -0.05 * s, 0.02 * s, carryBook);
+    place(box(0.05 * s, 0.25 * s, 0.19 * s, C.cream), 0.026 * s, -0.05 * s, 0.02 * s, carryBook);
+    place(box(0.068 * s, 0.04 * s, 0.215 * s, C.gold), 0.02 * s, 0.03 * s, 0.02 * s, carryBook);
+    arms[0].attach.add(carryBook);
+
+    readBook = new THREE.Group();
+    readBook.position.set(0, 0.72 * s, 0.44 * s);
+    readBook.rotation.x = -0.48;
+    // Left & right open covers + warm cream pages angled gently like an open volume
+    for (const side of [-1, 1]) {
+      const leaf = new THREE.Group();
+      leaf.position.x = side * 0.008 * s;
+      leaf.rotation.y = side * -0.24;
+      place(box(0.21 * s, 0.022 * s, 0.28 * s, C.kilimRed), side * 0.105 * s, 0, 0, leaf);
+      place(box(0.19 * s, 0.026 * s, 0.255 * s, C.chalk), side * 0.102 * s, 0.012 * s, 0, leaf);
+      place(box(0.14 * s, 0.006 * s, 0.02 * s, C.stoneMid), side * 0.1 * s, 0.027 * s, -0.05 * s, leaf);
+      place(box(0.12 * s, 0.006 * s, 0.02 * s, C.stoneMid), side * 0.1 * s, 0.027 * s, 0.01 * s, leaf);
+      place(box(0.13 * s, 0.006 * s, 0.02 * s, C.stoneMid), side * 0.1 * s, 0.027 * s, 0.07 * s, leaf);
+      readBook.add(leaf);
+    }
+    readBook.visible = false;
+    body.add(readBook);
+  }
+
   let trayGroup = null;
   if (tray) {
     trayGroup = new THREE.Group();
@@ -407,6 +437,8 @@ export function makeFigure({
     beadsGroup,
     cane: caneMesh,
     caneRest,
+    carryBook,
+    readBook,
     tray: trayGroup,
     pose,
     seed,
@@ -525,6 +557,20 @@ export function animateFigure(g, time, dt = 1 / 60) {
     bodyY = Math.abs(stride) * (r.pose === 'jog' ? 0.062 : 0.028) * s;
     bodyRx = (r.stoop || 0) + (r.pose === 'jog' ? 0.12 : 0.04);
     torsoRy += stride * 0.06;
+  } else if (r.pose === 'jump') {
+    bodyY = 0.05 * s;
+    bodyRx = 0.08;
+    lHipX = -0.45;
+    rHipX = -0.2;
+    lKneeX = 0.78;
+    rKneeX = 0.46;
+    lShX = -0.78;
+    rShX = -0.58;
+    lShZ = 0.34;
+    rShZ = -0.34;
+    lElX = -0.62;
+    rElX = -0.62;
+    headRx = -0.06;
   } else if (r.pose === 'sit') {
     bodyY = -0.24 * s;
     bodyRx = r.stoop || 0;
@@ -1113,6 +1159,14 @@ export function animateFigure(g, time, dt = 1 / 60) {
     r.cane.visible = !seated;
     if (r.caneRest) r.caneRest.visible = seated;
     r.cane.rotation.x = -(r.arms[1].pivot.rotation.x + r.arms[1].elbow.rotation.x) * 0.65;
+  }
+  if (r.carryBook || r.readBook) {
+    const seated = r.pose === 'sit';
+    if (r.carryBook) r.carryBook.visible = !seated;
+    if (r.readBook) {
+      r.readBook.visible = seated;
+      r.readBook.rotation.x = -0.48 + Math.sin(time * 1.1 + r.seed) * 0.03;
+    }
   }
 }
 

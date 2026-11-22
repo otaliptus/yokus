@@ -387,10 +387,16 @@ export class InteractionSystem {
           e.code === 'KeyW' ||
           e.code === 'KeyA' ||
           e.code === 'KeyS' ||
-          e.code === 'KeyD')
+          e.code === 'KeyD' ||
+          e.code === 'KeyE')
       ) {
         e.preventDefault();
         this.lastInput = this.game.time;
+        if (e.code === 'Space' && !e.repeat) {
+          this.game.triggerFreeRoamJump?.();
+        } else if ((e.code === 'KeyE' || e.code === 'Enter') && !e.repeat) {
+          this.game.toggleFreeRoamSit?.();
+        }
       }
       const n = this.game.state.stop;
       if (this.game.started && this.game.state.mode !== 'freeroam' && (e.code === 'Space' || e.key === 'Enter')) {
@@ -558,8 +564,16 @@ export class AudioManager {
         this.tone(220, 0.35, 0.02, 'triangle', -65);
         break;
       case 'splash':
-        this.noise(0.38, 1700, 0.07);
-        this.tone(280, 0.14, 0.025, 'sine', -120);
+        this.tone(195, 0.16, 0.045, 'sine', -105);
+        this.noise(0.36, 1550, 0.11);
+        this.noise(0.24, 2900, 0.068, 0.03);
+        this.tone(520, 0.075, 0.03, 'sine', 340, 0.05);
+        this.tone(760, 0.065, 0.022, 'sine', 260, 0.11);
+        break;
+      case 'wade':
+        this.noise(0.2, 1850, 0.068);
+        this.noise(0.14, 3100, 0.036, 0.02);
+        this.tone(440, 0.055, 0.018, 'sine', 210, 0.025);
         break;
       case 'reel':
         for (let i = 0; i < 4; i++) this.tone(1400 + i * 180, 0.04, 0.018, 'square', 0, i * 0.045);

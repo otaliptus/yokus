@@ -879,25 +879,107 @@ export function makeVillageHouse(parent, rng, x, z, style = 'lime', turn = 0, wi
     for (const xx of [-w * 0.32, w * 0.32]) {
       addWindow(g, xx, 1.32, d * 0.5 + 0.04, 0.78, 0.74, windowLights);
     }
-    // Authentic upper-story cantilevered wooden balcony with diagonal Anatolian corbel brackets & balcony door!
+    // Authentic upper-story wooden balcony with external timber staircase & cozy lookout chair!
     const deckY = 2.48;
-    const bw = w * 0.52;
-    place(box(bw, 0.13, 1.05, C.woodWarm), 0, deckY, d * 0.5 + 0.52, g);
-    // Diagonal timber corbels (eliböğründe) — no awkward ground posts blocking the door!
-    for (const xx of [-bw * 0.42, bw * 0.42]) {
-      g.add(beamBetween(V(xx, deckY - 0.62, d * 0.5 + 0.04), V(xx, deckY - 0.04, d * 0.5 + 0.92), 0.055, C.woodDark));
+    const bw = w * 0.78;
+    const balD = 1.42;
+    const zFront = d * 0.5 + balD;
+    const stairX = w * 0.5 + 0.56;
+    const stairZ0 = d * 0.5 - 2.15;
+    const stairZ1 = d * 0.5 + 0.76;
+
+    // Main balcony deck extending seamlessly into the right stair landing
+    const deckLeft = -bw * 0.5;
+    const deckRight = w * 0.5 + 1.08;
+    const deckW = deckRight - deckLeft;
+    const deckCx = (deckLeft + deckRight) * 0.5;
+    place(box(deckW, 0.13, balD, C.woodWarm), deckCx, deckY, d * 0.5 + balD * 0.5, g);
+
+    // Diagonal timber corbels (eliböğründe) under main balcony + sturdy corner posts under the stair landing
+    for (const xx of [deckLeft + 0.36, 0, bw * 0.42]) {
+      g.add(beamBetween(V(xx, deckY - 0.68, d * 0.5 + 0.04), V(xx, deckY - 0.04, zFront - 0.12), 0.055, C.woodDark));
     }
-    for (let i = 0; i < 6; i++) {
-      const bx = -bw * 0.44 + (i / 5) * (bw * 0.88);
-      place(cyl(0.024, 0.028, 0.66, C.woodDark, 6), bx, deckY + 0.36, d * 0.5 + 0.98, g);
+    for (const px of [w * 0.5 + 0.14, deckRight - 0.08]) {
+      place(cyl(0.055, 0.068, deckY, C.woodDark, 7), px, deckY * 0.5, zFront - 0.1, g);
     }
-    place(cyl(0.04, 0.04, bw, C.woodWarm, 7), 0, deckY + 0.7, d * 0.5 + 0.98, g).rotation.z = Math.PI / 2;
+
+    // Front balcony balustrade (full width) + left end rail + outer right landing rail (stair entry stays wide open!)
+    const postCount = 9;
+    for (let i = 0; i < postCount; i++) {
+      const bx = lerp(deckLeft + 0.08, deckRight - 0.08, i / (postCount - 1));
+      place(cyl(0.024, 0.028, 0.68, C.woodDark, 6), bx, deckY + 0.36, zFront - 0.06, g);
+    }
+    place(cyl(0.042, 0.042, deckW, C.woodWarm, 7), deckCx, deckY + 0.72, zFront - 0.06, g).rotation.z = Math.PI / 2;
+    // Left side rail
+    for (const sz of [d * 0.5 + 0.35, d * 0.5 + 0.85]) {
+      place(cyl(0.024, 0.028, 0.68, C.woodDark, 6), deckLeft + 0.06, deckY + 0.36, sz, g);
+    }
+    place(cyl(0.04, 0.04, balD - 0.1, C.woodWarm, 7), deckLeft + 0.06, deckY + 0.72, d * 0.5 + balD * 0.5, g).rotation.x = Math.PI / 2;
+    // Right landing outer rail (from stair top forward to front rail)
+    place(cyl(0.024, 0.028, 0.68, C.woodDark, 6), deckRight - 0.06, deckY + 0.36, stairZ1 + 0.25, g);
+    place(cyl(0.04, 0.04, zFront - stairZ1, C.woodWarm, 7), deckRight - 0.06, deckY + 0.72, (stairZ1 + zFront) * 0.5, g).rotation.x = Math.PI / 2;
+
+    // External Anatolian timber staircase climbing up the +X wall onto the balcony landing!
+    const steps = 10;
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 0.5) / steps;
+      const sy = lerp(0.12, deckY - 0.06, t);
+      const sz = lerp(stairZ0, stairZ1, t);
+      place(box(1.02, 0.1, 0.34, C.woodWarm), stairX, sy, sz, g);
+    }
+    // Diagonal wooden stair stringers & outer sloped handrail
+    for (const ox of [-0.46, 0.46]) {
+      g.add(beamBetween(V(stairX + ox, 0.08, stairZ0 - 0.12), V(stairX + ox, deckY - 0.04, stairZ1 + 0.06), 0.055, C.woodDark));
+    }
+    g.add(beamBetween(V(stairX + 0.48, 0.78, stairZ0 - 0.05), V(stairX + 0.48, deckY + 0.72, stairZ1 + 0.04), 0.038, C.woodWarm));
+    for (const f of [0.0, 0.35, 0.7, 1.0]) {
+      const py = lerp(0.1, deckY, f);
+      const pz = lerp(stairZ0 - 0.05, stairZ1 + 0.04, f);
+      place(cyl(0.024, 0.028, 0.72, C.woodDark, 6), stairX + 0.48, py + 0.36, pz, g);
+    }
+    // Mid-stair support post down to ground
+    place(cyl(0.05, 0.06, deckY * 0.55, C.woodDark, 7), stairX + 0.46, deckY * 0.27, lerp(stairZ0, stairZ1, 0.55), g);
+
     // Real upper balcony doorway behind the balcony!
-    addDoorFrame(g, 0.0, deckY + 0.82, d * 0.5 + 0.03, 0.92, 1.56, true);
+    addDoorFrame(g, 0.15, deckY + 0.82, d * 0.5 + 0.03, 0.92, 1.56, true);
     // Bright woven kilim draped over the upper balcony rail!
-    place(box(0.84, 0.68, 0.06, C.kilimRed), 0.12, deckY + 0.36, d * 0.5 + 1.04, g);
-    place(box(0.84, 0.13, 0.07, C.gold), 0.12, deckY + 0.36, d * 0.5 + 1.045, g);
-    place(box(0.84, 0.11, 0.07, C.kilimIndigo), 0.12, deckY + 0.14, d * 0.5 + 1.045, g);
+    place(box(0.84, 0.68, 0.06, C.kilimRed), 0.42, deckY + 0.36, zFront + 0.02, g);
+    place(box(0.84, 0.13, 0.07, C.gold), 0.42, deckY + 0.36, zFront + 0.025, g);
+    place(box(0.84, 0.11, 0.07, C.kilimIndigo), 0.42, deckY + 0.14, zFront + 0.025, g);
+
+    // Cozy wooden lookout chair on the left side of the balcony facing outward (+Z) to sit & watch the village!
+    const chairX = deckLeft + 0.78;
+    const chairZ = d * 0.5 + 0.66;
+    const chair = new THREE.Group();
+    chair.position.set(chairX, deckY + 0.065, chairZ);
+    g.add(chair);
+    for (const lx of [-0.2, 0.2]) {
+      for (const lz of [-0.2, 0.2]) {
+        place(cyl(0.024, 0.028, 0.4, C.woodDark, 6), lx, 0.2, lz, chair);
+      }
+    }
+    place(box(0.5, 0.06, 0.48, C.woodWarm), 0, 0.41, 0, chair);
+    place(box(0.42, 0.06, 0.4, C.kilimRed), 0, 0.46, 0.01, chair);
+    place(box(0.5, 0.46, 0.055, C.woodDark), 0, 0.66, -0.21, chair);
+    place(box(0.46, 0.07, 0.065, C.woodWarm), 0, 0.9, -0.21, chair);
+    for (const sx of [-0.24, 0.24]) {
+      place(box(0.055, 0.045, 0.44, C.woodWarm), sx, 0.62, -0.01, chair);
+    }
+    // Little geranium pot beside the balcony chair
+    makeGeraniumTin(g, deckLeft + 0.26, deckY + 0.065, zFront - 0.3, 0.78);
+
+    g.userData.balconyMeta = {
+      w,
+      d,
+      deckY,
+      deckLeft,
+      deckRight,
+      balD,
+      stairX,
+      stairZ0,
+      stairZ1,
+      chairLocal: V(chairX, deckY + 0.065, chairZ),
+    };
   } else {
     for (const xx of [-w * 0.28, w * 0.28]) {
       addWindow(g, xx, h * 0.6, d * 0.5 + 0.04, 0.84, 0.78, windowLights);

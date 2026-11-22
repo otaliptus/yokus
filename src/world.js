@@ -125,6 +125,8 @@ export class World {
     this.cats = [];
     this.windowLights = [];
     this.obstacles = [];
+    this.walkSurfaces = [];
+    this.roamSeats = [];
     this.time = 0;
     this.game = null;
 
@@ -146,37 +148,95 @@ export class World {
     this.prepareOccluders();
   }
 
-  addObstacleBox(cx, cz, w, d) {
-    this.obstacles.push({ kind: 'box', cx, cz, hw: w * 0.5, hd: d * 0.5 });
+  addObstacleBox(cx, cz, w, d, yaw = 0, maxY = Infinity) {
+    this.obstacles.push({ kind: 'box', cx, cz, hw: w * 0.5, hd: d * 0.5, yaw, maxY });
   }
 
-  addObstacleCircle(cx, cz, r) {
-    this.obstacles.push({ kind: 'circle', cx, cz, r });
+  addObstacleCircle(cx, cz, r, maxY = Infinity) {
+    this.obstacles.push({ kind: 'circle', cx, cz, r, maxY });
   }
 
-  // True walkable surface height (terrain everywhere + smooth stone ramps & deck top across the river bridge + courtyard flagstones!)
-  walkHeight(x, z) {
-    const g = ground(x, z);
+  addWalkBox(cx, cz, w, d, topY, yaw = 0) {
+    this.walkSurfaces.push({ kind: 'box', cx, cz, hw: w * 0.5, hd: d * 0.5, topY, yaw });
+  }
+
+  addWalkRamp(cx, cz, w, d, y0, y1, yaw = 0) {
+    this.walkSurfaces.push({ kind: 'ramp', cx, cz, hw: w * 0.5, hd: d * 0.5, y0, y1, yaw });
+  }
+
+  addWalkCircle(cx, cz, r, topY) {
+    this.walkSurfaces.push({ kind: 'circle', cx, cz, r, topY });
+  }
+
+  // Natural flat-topped Anatolian limestone stepping rock that players can jump onto & climb!
+  addClimbRock(x, z, r = 0.72, h = 0.56, parent = this.village) {
+    const gy = ground(x, z);
+    const g = new THREE.Group();
+    g.position.set(x, gy, z);
+    const main = mesh(new THREE.CylinderGeometry(r * 0.86, r * 1.06, h, 8), C.stoneMid, 0.04, mossyStoneMat);
+    main.position.y = h * 0.5;
+    main.rotation.y = (x * 1.7 + z * 0.9) % 6.28;
+    g.add(main);
+    const cap = mesh(new THREE.CylinderGeometry(r * 0.82, r * 0.9, 0.1, 8), C.stoneLight, 0.03, mossyStoneMat);
+    cap.position.y = h - 0.02;
+    cap.rotation.y = main.rotation.y + 0.3;
+    g.add(cap);
+    parent.add(g);
+    this.addWalkCircle(x, z, r * 0.9, gy + h + 0.03);
+    this.addObstacleCircle(x, z, r * 0.78, gy + h - 0.08);
+    return g;
+  }
+
+  // True walkable surface height (terrain everywhere + bridge + courtyard + climbable rocks, stairs & balconies!)
+  walkHeight(x, z, curY = null) {
+    let best = ground(x, z);
     const bx = -1.15;
     const bz = riverCenterZ(bx);
     const deckTop = riverSurfaceY() + 0.58;
     if (Math.abs(x - bx) < 2.25) {
       const dz = Math.abs(z - bz);
-      if (dz <= 3.75) return Math.max(g, deckTop);
-      if (dz < 5.45) {
+      if (dz <= 3.75) best = Math.max(best, deckTop);
+      else if (dz < 5.45) {
         const t = smooth((5.45 - dz) / 1.7);
-        return lerp(g, deckTop, t);
+        best = Math.max(best, lerp(best, deckTop, t));
       }
     }
     if (this.houseY != null && Math.abs(x) < 4.8 && z > -45.9 && z < -39.7) {
-      return Math.max(g, this.houseY + 0.06);
+      best = Math.max(best, this.houseY + 0.06);
     }
-    return g;
+    if (curY != null && this.walkSurfaces.length) {
+      for (const s of this.walkSurfaces) {
+        if (s.kind === 'circle') {
+          const dx = x - s.cx;
+          const dz = z - s.cz;
+          if (dx * dx + dz * dz <= s.r * s.r && s.topY <= curY + 0.62) {
+            best = Math.max(best, s.topY);
+          }
+        } else {
+          const dx = x - s.cx;
+          const dz = z - s.cz;
+          const c = Math.cos(s.yaw || 0);
+          const sn = Math.sin(s.yaw || 0);
+          const lx = dx * c - dz * sn;
+          const lz = dx * sn + dz * c;
+          if (Math.abs(lx) <= s.hw && Math.abs(lz) <= s.hd) {
+            if (s.kind === 'box') {
+              if (s.topY <= curY + 0.62) best = Math.max(best, s.topY);
+            } else if (s.kind === 'ramp') {
+              const t = clamp((lz + s.hd) / Math.max(0.01, 2 * s.hd), 0, 1);
+              const ry = lerp(s.y0, s.y1, t);
+              if (ry <= curY + 0.72) best = Math.max(best, ry);
+            }
+          }
+        }
+      }
+    }
+    return best;
   }
 
   // Additional solid footprints used only during post-game free roam (exterior house & village mosque)
-  resolveFreeRoamCollisions(pos, radius = 0.3) {
-    this.resolveCollisions(pos, radius);
+  resolveFreeRoamCollisions(pos, radius = 0.3, curY = null) {
+    this.resolveCollisions(pos, radius, curY);
     const extras = [
       { cx: 0, cz: -48.0, hw: 4.15, hd: 3.85 }, // Great-grandfather's house exterior
       { cx: -28.6, cz: -24.5, hw: 2.85, hd: 2.9 }, // Left hillside village mosque
@@ -198,10 +258,11 @@ export class World {
   }
 
   // Smoothly push a walking position clear of any registered wall, building, table, vehicle, rock, or post!
-  resolveCollisions(pos, radius = 0.32) {
+  resolveCollisions(pos, radius = 0.32, curY = null) {
     for (let pass = 0; pass < 2; pass++) {
       for (const ob of this.obstacles) {
         if (ob.active === false) continue;
+        if (curY != null && ob.maxY != null && curY > ob.maxY - 0.14) continue;
         if (ob.kind === 'circle') {
           const dx = pos.x - ob.cx;
           const dz = pos.z - ob.cz;
@@ -211,6 +272,23 @@ export class World {
             const d = Math.sqrt(d2);
             pos.x = ob.cx + (dx / d) * minD;
             pos.z = ob.cz + (dz / d) * minD;
+          }
+        } else if (ob.yaw) {
+          const dx = pos.x - ob.cx;
+          const dz = pos.z - ob.cz;
+          const c = Math.cos(ob.yaw);
+          const sn = Math.sin(ob.yaw);
+          const lx = dx * c - dz * sn;
+          const lz = dx * sn + dz * c;
+          const ox = ob.hw + radius - Math.abs(lx);
+          const oz = ob.hd + radius - Math.abs(lz);
+          if (ox > 0 && oz > 0) {
+            let nlx = lx;
+            let nlz = lz;
+            if (ox < oz) nlx += lx >= 0 ? ox : -ox;
+            else nlz += lz >= 0 ? oz : -oz;
+            pos.x = ob.cx + nlx * c + nlz * sn;
+            pos.z = ob.cz - nlx * sn + nlz * c;
           }
         } else {
           const dx = pos.x - ob.cx;
@@ -380,9 +458,38 @@ export class World {
       [-12.2, -39.5, 'lime', 0.12],
     ];
     for (const [hx, hz, style, turn] of housePlots) {
-      this.mask.addRect(hx, hz, 7.2, 6.4);
-      this.addObstacleBox(hx, hz, 5.8, 5.0);
-      makeVillageHouse(this.village, this.rng, hx, hz, style, turn, this.windowLights);
+      this.mask.addRect(hx, hz, 7.6, 6.8);
+      const houseObj = makeVillageHouse(this.village, this.rng, hx, hz, style, turn, this.windowLights);
+      const bm = houseObj.userData.balconyMeta;
+      if (bm) {
+        const baseY = houseObj.position.y;
+        const c = Math.cos(turn);
+        const s = Math.sin(turn);
+        const toWorld = (lx, lz) => [hx + lx * c + lz * s, hz - lx * s + lz * c];
+        // Tight rotated house shell footprint so the external wooden staircase & balcony stay 100% clear!
+        this.addObstacleBox(hx, hz, bm.w - 0.1, bm.d - 0.1, turn, baseY + 4.8);
+        // Walkable wooden staircase ramp leading up to the balcony landing!
+        const stairMidZ = (bm.stairZ0 + bm.stairZ1) * 0.5;
+        const [sx, sz] = toWorld(bm.stairX, stairMidZ);
+        this.addWalkRamp(sx, sz, 1.18, bm.stairZ1 - bm.stairZ0 + 0.5, baseY, baseY + bm.deckY + 0.065, turn);
+        // Walkable upper balcony deck & landing!
+        const deckMidX = (bm.deckLeft + bm.deckRight) * 0.5;
+        const deckMidZ = bm.d * 0.5 + bm.balD * 0.5;
+        const [dx, dz] = toWorld(deckMidX, deckMidZ);
+        this.addWalkBox(dx, dz, bm.deckRight - bm.deckLeft + 0.14, bm.balD + 0.14, baseY + bm.deckY + 0.065, turn);
+        // Cozy wooden lookout chair on the balcony facing out over the village!
+        const [cx, cz] = toWorld(bm.chairLocal.x, bm.chairLocal.z);
+        const [lx, lz] = toWorld(bm.chairLocal.x, bm.chairLocal.z + 8.0);
+        const [stX, stZ] = toWorld(bm.chairLocal.x + 0.65, bm.chairLocal.z + 0.15);
+        this.roamSeats.push({
+          pos: V(cx, baseY + bm.deckY + 0.18, cz),
+          standPos: V(stX, baseY + bm.deckY + 0.065, stZ),
+          lookAt: V(lx, baseY + bm.deckY + 0.18, lz),
+          label: 'balcony chair',
+        });
+      } else {
+        this.addObstacleBox(hx, hz, 5.6, 4.8, turn);
+      }
     }
 
     // Lush sculpted trees framing the road, gardens & hillsides (with vivid accents like full-20.png!)
@@ -399,7 +506,7 @@ export class World {
       [-14.0, 11.0, 'apricot', 1.02],
       [6.0, 18.0, 'pomegranate', 0.92],
       [-8.5, 9.5, 'poplar', 1.0],
-      [-9.5, 3.0, 'poplar', 1.12],
+      [-9.8, 5.4, 'poplar', 1.08],
       [-8.5, -4.0, 'goldAutumn', 0.95],
       [19.5, 4.0, 'poplar', 1.08],
       [19.5, -4.0, 'poplar', 1.15],
@@ -414,7 +521,7 @@ export class World {
       [-7.0, -21.0, 'apricot', 0.95],
       [-9.0, -32.0, 'goldAutumn', 1.05],
       [14.5, -28.0, 'poplar', 1.05],
-      [14.5, -33.0, 'poplar', 1.12],
+      [17.2, -33.8, 'poplar', 1.12],
       [-7.4, -45.5, 'mulberry', 0.82],
       [7.4, -45.5, 'apricot', 0.82],
       [-11.0, -47.0, 'pomegranate', 1.1],
@@ -456,15 +563,59 @@ export class World {
       this.village.add(cl);
     }
 
-    // Dry-stone walls enclosing gardens & lanes (registered as solid obstacles!)
+    // Dry-stone walls enclosing gardens & lanes (registered as jumpable low walls in free roam!)
     dryStoneWall(this.village, -4.5, 31.0, 6.0, 'z', 0.68, this.rng);
-    this.addObstacleBox(-4.5, 31.0, 0.6, 6.1);
+    this.addObstacleBox(-4.5, 31.0, 0.6, 6.1, 0, ground(-4.5, 31.0) + 0.72);
     dryStoneWall(this.village, 5.2, 24.5, 5.5, 'z', 0.68, this.rng);
-    this.addObstacleBox(5.2, 24.5, 0.6, 5.6);
+    this.addObstacleBox(5.2, 24.5, 0.6, 5.6, 0, ground(5.2, 24.5) + 0.72);
     dryStoneWall(this.village, -6.0, 5.5, 6.0, 'z', 0.7, this.rng);
-    this.addObstacleBox(-6.0, 5.5, 0.6, 6.1);
+    this.addObstacleBox(-6.0, 5.5, 0.6, 6.1, 0, ground(-6.0, 5.5) + 0.74);
     dryStoneWall(this.village, -5.8, -24.5, 6.2, 'z', 0.7, this.rng);
-    this.addObstacleBox(-5.8, -24.5, 0.6, 6.3);
+    this.addObstacleBox(-5.8, -24.5, 0.6, 6.3, 0, ground(-5.8, -24.5) + 0.74);
+
+    // Climbable flat-topped Anatolian stepping rocks & lookout boulders for free-roam jumping!
+    const climbRocks = [
+      // Stepped lookout boulders near lower village & fountain
+      [3.1, 29.8, 0.72, 0.48],
+      [4.2, 29.0, 0.76, 0.88],
+      [5.3, 28.2, 0.84, 1.32],
+      // River stepping stones across the sparkling eastern stream (hop rock-to-rock or splash in!)
+      [5.4, -12.6, 0.68, 0.42],
+      [6.4, -13.9, 0.72, 0.46],
+      [7.4, -15.3, 0.7, 0.44],
+      [8.3, -16.7, 0.68, 0.42],
+      // Mossy stepping boulders beside the west balcony house
+      [-7.9, 2.2, 0.74, 0.52],
+      [-7.0, 1.1, 0.8, 0.94],
+      // Hilltop stepping stones leading up to the village mosque overlook
+      [-23.6, -21.2, 0.76, 0.5],
+      [-22.5, -22.2, 0.82, 0.92],
+      [-21.4, -23.1, 0.9, 1.35],
+    ];
+    for (const [rx, rz, rr, rh] of climbRocks) {
+      this.addClimbRock(rx, rz, rr, rh);
+    }
+
+    // Cozy hillside lookout chair beside the village mosque overlooking the whole valley!
+    const mx = -25.4;
+    const mz = -23.6;
+    const my = ground(mx, mz);
+    const mChair = new THREE.Group();
+    mChair.position.set(mx, my, mz);
+    mChair.rotation.y = 1.25;
+    this.village.add(mChair);
+    for (const lx of [-0.22, 0.22]) {
+      for (const lz of [-0.22, 0.22]) place(cyl(0.026, 0.03, 0.42, C.woodDark, 6), lx, 0.21, lz, mChair);
+    }
+    place(box(0.54, 0.06, 0.5, C.woodWarm), 0, 0.42, 0, mChair);
+    place(box(0.46, 0.06, 0.42, C.kilimRed), 0, 0.47, 0.01, mChair);
+    place(box(0.54, 0.48, 0.06, C.woodDark), 0, 0.68, -0.22, mChair);
+    this.roamSeats.push({
+      pos: V(mx, my + 0.14, mz),
+      standPos: V(mx + 0.75, ground(mx + 0.75, mz + 0.25), mz + 0.25),
+      lookAt: V(mx + 8.0, my + 0.14, mz + 2.6),
+      label: 'hillside lookout chair',
+    });
 
     // Masked swaying grass & wildflowers (ZERO tufts in water, road, pitch, or buildings!)
     this.scene.add(makeGrass(this.rng, this.mask, IS_MOBILE ? 1600 : 4200));
@@ -2004,7 +2155,7 @@ export class World {
       cat.userData.angry = cs.angry;
       this.scene.add(cat);
       this.cats.push(cat);
-      if (!cs.angry) this.interactive('cat-' + i, cat, { label: 'pet cat' });
+      this.interactive('cat-' + i, cat, { label: 'pet cat' });
     });
   }
 
@@ -2228,8 +2379,8 @@ export class World {
     }
 
     // Great-Grandfather Dede's heirloom carved walnut reading armchair (koltuk) & little brass-lamp side table!
-    this.dedeChairPos = V(-1.52, y + 0.24, -45.88);
-    this.dedeChairYaw = 1.88; // Angled warmly toward the open book & grandson in the golden sunbeam!
+    this.dedeChairPos = V(-1.58, y + 0.3, -45.92);
+    this.dedeChairYaw = 1.72; // Angled warmly toward the open book & grandson in the golden sunbeam!
     this.dedeChair = new THREE.Group();
     this.dedeChair.position.set(this.dedeChairPos.x, y + 0.16, this.dedeChairPos.z);
     this.dedeChair.rotation.y = this.dedeChairYaw;
@@ -2311,9 +2462,9 @@ export class World {
       this.interactive('npc-readkid-' + i, f, { label: 'greet child', quietMarker: true });
     });
 
-    // Player's childhood self & Great-Grandfather Dede (appear at the ending!)
+    // Player's childhood self (noticeably small child!) & Great-Grandfather Dede holding his own book!
     this.selfChild = this.figure(
-      { height: 1.14, palette: C.rust, stripe: C.cream, trouser: C.dark, shorts: true, headwear: 'cap', hair: '#3b2d24', child: true, pose: 'sit', seed: 58 },
+      { height: 1.0, palette: C.rust, stripe: C.cream, trouser: C.dark, shorts: true, headwear: 'cap', hair: '#3b2d24', child: true, pose: 'sit', seed: 58 },
       0,
       -46.4
     );
@@ -2335,14 +2486,15 @@ export class World {
         mustache: '#e8e2d5',
         pose: 'walk',
         cane: true,
+        book: true,
         seed: 61,
       },
-      -3.1,
-      -46.5
+      -1.28,
+      -44.15
     );
     this.dede.position.y = y + 0.18;
     this.dede.visible = false;
-    faceFigure(this.dede, V(0, y, -46.4));
+    faceFigure(this.dede, V(-0.76, y + 0.18, -46.06));
 
     // Floating golden dust motes in the sunbeam
     this.roomDust = points(80, '#ffe49e', 2.0, 0.65);
@@ -3041,19 +3193,21 @@ export class World {
     for (const c of this.cats) {
       const u = c.userData;
       if (u.angry) {
-        // Grumpy black cat: sits still with narrowed eyes, naturally whipping its tail left & right like an annoyed cat — nothing else!
+        // Grumpy black cat: sits still until petted; upon petting, naturally whips its tail left & right with narrowed eyes — nothing else!
+        const pet = u.pet > 0;
+        u.happy = lerp(u.happy || 0, pet ? 1 : 0, 1 - Math.exp(-dt * 7));
         const t = this.time;
-        const rhythm = 0.78 + 0.22 * Math.sin(t * 1.15);
-        const whip = Math.tanh(Math.sin(t * 3.8) * 2.15) * 0.68 + Math.sin(t * 7.6 + 0.6) * 0.08;
-        const tipLag = Math.tanh(Math.sin(t * 3.8 - 0.65) * 2.15) * 0.55;
+        const rhythm = (0.78 + 0.22 * Math.sin(t * 1.15)) * u.happy;
+        const whip = (Math.tanh(Math.sin(t * 3.8) * 2.15) * 0.68 + Math.sin(t * 7.6 + 0.6) * 0.08) * rhythm;
+        const tipLag = Math.tanh(Math.sin(t * 3.8 - 0.65) * 2.15) * 0.55 * rhythm;
         u.body.position.y = 0.18;
         u.body.scale.z = 1.0 + Math.sin(t * 1.5) * 0.008;
         u.body.rotation.z = 0;
         u.head.rotation.x = 0.03;
         u.head.rotation.z = 0;
-        u.tailPivot.rotation.set(0.08 + Math.abs(whip) * 0.14, whip * rhythm, 0);
-        if (u.tailMid) u.tailMid.rotation.set(0.06, tipLag * rhythm, 0);
-        for (const e of u.eyes) e.scale.y = 0.62;
+        u.tailPivot.rotation.set(0.08 + Math.abs(whip) * 0.14, whip, 0);
+        if (u.tailMid) u.tailMid.rotation.set(0.06, tipLag, 0);
+        for (const e of u.eyes) e.scale.y = lerp(1.0, 0.58, u.happy);
         continue;
       }
       const pet = u.pet > 0;
