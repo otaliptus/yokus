@@ -126,6 +126,7 @@ export class StopDirector {
       rippleTime: 99,
       fish: 1, // Village kid's bucket already has 1 morning trout!
       caught: 0,
+      unlimitedMode: false,
     };
     g.bread = {
       bites: 0,
@@ -178,7 +179,11 @@ export class StopDirector {
     g.ui.ending.classList.remove('visible');
     g.ui.endActions?.classList.remove('visible');
     if (n !== 2 || !g.football.unlimitedMode) {
-      if (!(n === 1 && g.tea.unlimitedMode) && !(n === 4 && g.bread.unlimitedMode)) {
+      if (
+        !(n === 1 && g.tea.unlimitedMode) &&
+        !(n === 3 && g.river.unlimitedMode) &&
+        !(n === 4 && g.bread.unlimitedMode)
+      ) {
         g.ui.fkHud?.classList.remove('visible');
       }
     }
@@ -417,7 +422,7 @@ export class StopDirector {
     const g = this.game;
     if (n === 1) return !g.tea.unlimitedMode && g.tea.firstGlass && g.tea.stage === 'idle';
     if (n === 2) return !g.football.unlimitedMode && g.football.afterMemory && (g.football.phase === 'aim' || g.football.phase === 'reset');
-    if (n === 3) return g.river.memoryDone && g.river.caught >= 1 && !g.river.holdingFish && !g.river.droppingFish;
+    if (n === 3) return !g.river.unlimitedMode && g.river.memoryDone && g.river.caught >= 1 && !g.river.holdingFish && !g.river.droppingFish;
     if (n === 4) return !g.bread.unlimitedMode && g.bread.bites >= 3 && g.bread.memoryTime <= 0 && !g.bread.hug;
     return false;
   }
@@ -1469,30 +1474,7 @@ export class StopDirector {
       }
 
       // White cat playful sprint cleanly around the right side of the house (hugging real terrain!) to sit smugly peeking out behind the back-right corner!
-      if (h.whiteCatFlee) {
-        const wf = h.whiteCatFlee;
-        const cat = w.cats[2];
-        wf.time += dt;
-        const p = clamp(wf.time / wf.duration, 0, 1);
-        const pos = wf.curve.getPointAt(smooth(p));
-        const ahead = wf.curve.getPointAt(Math.min(1, smooth(p) + 0.04));
-        const onYard = Math.abs(pos.x) <= 4.75 && pos.z >= -45.85 && pos.z <= -39.75;
-        pos.y = Math.max(ground(pos.x, pos.z), onYard ? w.houseY + 0.06 : -999) + 0.02;
-        cat.position.copy(pos);
-        if (p < 0.96) {
-          cat.userData.running = true;
-          cat.rotation.y = Math.atan2(ahead.x - pos.x, ahead.z - pos.z);
-          if (Math.floor(wf.time * 6) !== Math.floor((wf.time - dt) * 6)) {
-            w.spawnPuff(pos.clone().add(V(0, 0.08, 0)), 4, '#efe4cc');
-          }
-          faceFigureSmooth(g.player, pos, dt, 6);
-        } else {
-          cat.userData.running = false;
-          // Turns around smugly sitting behind the back-right corner of the house (clearly visible when zoomed out!)
-          cat.rotation.y = -Math.PI * 0.25;
-          h.whiteCatFlee = null;
-        }
-      }
+      this.updateWhiteCatFlee(dt);
 
       // Multi-stage walking inside Great-Grandfather's house: climb stone steps -> swing door INWARD -> step inside doorway -> warm dissolve!
       if (h.opening && !h.walkTo) {
@@ -2510,6 +2492,7 @@ export class StopDirector {
         g.audio.sfx('plop');
         w.spawnPuff(bucketTop, 16, '#eef8fc');
         if (w.riverKid) triggerAction(w.riverKid, 'cheer', 2.2, g.time);
+        g.updateModeHud?.();
       }
 
       if (p >= 1) {
@@ -2726,13 +2709,12 @@ export class StopDirector {
     if (t >= 19.5 && t < 26.5) g.ui.ending.classList.add('visible');
     else g.ui.ending.classList.remove('visible');
 
-    if (t >= 27.5) {
-      g.state.mode = 'final';
+    // After the title card fades cleanly over the dusk village, transition straight into village Free Roam!
+    if (t >= 29.0) {
       g.state.white = 0;
       g.ui.ending.classList.remove('visible');
-      g.ui.endActions?.classList.add('visible');
-      g.rig.setFixed(w.finalView.position, w.finalView.target, 44.0);
       g.finish();
+      g.startFreeRoam();
     }
   }
 
@@ -2905,6 +2887,35 @@ export class StopDirector {
     setPose(w.aunt, 'walk');
     setPose(g.player, 'walk');
     g.audio.sfx('murmur');
+  }
+
+  updateWhiteCatFlee(dt) {
+    const g = this.game;
+    const w = g.world;
+    const h = g.house;
+    if (!h.whiteCatFlee) return;
+    const wf = h.whiteCatFlee;
+    const cat = w.cats[2];
+    wf.time += dt;
+    const p = clamp(wf.time / wf.duration, 0, 1);
+    const pos = wf.curve.getPointAt(smooth(p));
+    const ahead = wf.curve.getPointAt(Math.min(1, smooth(p) + 0.04));
+    const onYard = Math.abs(pos.x) <= 4.75 && pos.z >= -45.85 && pos.z <= -39.75;
+    pos.y = Math.max(ground(pos.x, pos.z), onYard ? w.houseY + 0.06 : -999) + 0.02;
+    cat.position.copy(pos);
+    if (p < 0.96) {
+      cat.userData.running = true;
+      cat.rotation.y = Math.atan2(ahead.x - pos.x, ahead.z - pos.z);
+      if (Math.floor(wf.time * 6) !== Math.floor((wf.time - dt) * 6)) {
+        w.spawnPuff(pos.clone().add(V(0, 0.08, 0)), 4, '#efe4cc');
+      }
+      if (g.state.mode !== 'freeroam') faceFigureSmooth(g.player, pos, dt, 6);
+    } else {
+      cat.userData.running = false;
+      // Turns around smugly sitting behind the back-right corner of the house (clearly visible when zoomed out!)
+      cat.rotation.y = -Math.PI * 0.25;
+      h.whiteCatFlee = null;
+    }
   }
 
   // --- WHITE CAT COMEDY FLEE BEHIND GREAT-GRANDFATHER'S HOUSE ---

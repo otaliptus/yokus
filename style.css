@@ -257,10 +257,31 @@ body {
   pointer-events: auto;
 }
 
-#fk-exit-btn {
+#fk-exit-btn,
+#roam-act-btn {
   padding: 6px 12px;
   font-size: 10px;
   letter-spacing: 0.16em;
+}
+
+#roam-act-btn {
+  border: 1px solid rgba(244, 199, 98, 0.88);
+  border-radius: 999px;
+  background: rgba(68, 48, 34, 0.78);
+  color: #ffe9a8;
+  font-family: system-ui, -apple-system, sans-serif;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+#roam-act-btn:hover {
+  background: rgba(88, 62, 42, 0.94);
+  border-color: #fff2c2;
+}
+
+#roam-act-btn[hidden] {
+  display: none;
 }
 
 #mute-mark {

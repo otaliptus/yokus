@@ -251,9 +251,12 @@ export class World {
         else pos.z += dz >= 0 ? oz : -oz;
       }
     }
-    // Keep comfortably inside the 210x210 sculpted Anatolian hillside terrain!
-    pos.x = clamp(pos.x, -82, 82);
-    pos.z = clamp(pos.z, -90, 76);
+    // Tight, scenic Anatolian village border framed naturally by the surrounding woods
+    // (widens smoothly on the west around the hillside village mosque & lookout chair!)
+    pos.z = clamp(pos.z, -56.5, 43.5);
+    const mosquePocket = 1 - smooth((Math.abs(pos.z + 24.5) - 6.5) / 5.0);
+    const minX = lerp(-22.5, -34.0, mosquePocket);
+    pos.x = clamp(pos.x, minX, 22.5);
     return pos;
   }
 

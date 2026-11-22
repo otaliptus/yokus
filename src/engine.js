@@ -395,7 +395,7 @@ export class InteractionSystem {
         if (e.code === 'Space' && !e.repeat) {
           this.game.triggerFreeRoamJump?.();
         } else if ((e.code === 'KeyE' || e.code === 'Enter') && !e.repeat) {
-          this.game.toggleFreeRoamSit?.();
+          this.game.triggerFreeRoamAction?.();
         }
       }
       const n = this.game.state.stop;
