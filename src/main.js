@@ -295,8 +295,9 @@ class YokusGame {
     this.stops.enter(3);
     this.rig.snapToStop(3, true);
     this.player.position.copy(this.world.riverSeatPos);
+    this.player.userData.turnTarget = null;
     setPose(this.player, 'sit', true);
-    faceFigure(this.player, V(this.world.riverSeatPos.x, this.world.riverY, this.world.riverSeatPos.z - 4));
+    faceFigure(this.player, V(this.world.riverSeatPos.x, this.world.riverY, this.world.riverSeatPos.z - 5));
     this.player.userData.action = 'fish';
     this.player.userData.actionUntil = Infinity;
     this.updateModeHud();

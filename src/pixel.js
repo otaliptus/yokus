@@ -677,6 +677,7 @@ export class CameraRig {
     if (spot) {
       if (immediate) {
         this.player.position.copy(spot.pos);
+        this.player.userData.turnTarget = null;
         setPose(this.player, spot.pose, true);
         faceFigure(this.player, spot.lookAt);
       } else {
