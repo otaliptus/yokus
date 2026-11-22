@@ -1,0 +1,44 @@
+[
+  {
+    "file": "01-uzun-ince-bir-yoldayim.mp3",
+    "use": ["arrival", "minibus"],
+    "volume": 0.44,
+    "credit": "\"Uzun İnce Bir Yoldayım (Instrumental)\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "02-teahouse-classical.mp3",
+    "use": ["teahouse"],
+    "volume": 0.40,
+    "credit": "\"Turkish Classical\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "03-football-oud.mp3",
+    "use": ["football"],
+    "volume": 0.40,
+    "credit": "\"Turkish Elegance\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "04-river-oud.mp3",
+    "use": ["river"],
+    "volume": 0.40,
+    "credit": "\"Cultural Tapestry\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "05-courtyard-saz.mp3",
+    "use": ["bread", "house"],
+    "volume": 0.40,
+    "credit": "\"Heritage Echoes\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "06-readingroom-ney.mp3",
+    "use": ["readingroom"],
+    "volume": 0.42,
+    "credit": "\"Mesmerizing Turkish Instrumental\" via Internet Archive Turkish Instrumental Music (CC0)"
+  },
+  {
+    "file": "07-ending-keman.mp3",
+    "use": ["ending"],
+    "volume": 0.46,
+    "credit": "\"Yeniden Doğuş\" via Internet Archive Turkish Instrumental Music (CC0)"
+  }
+]
