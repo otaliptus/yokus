@@ -1418,8 +1418,8 @@ export class StopDirector {
         } else {
           faceFigureSmooth(g.player, wt.lookAt, dt, 12);
         }
-        // As soon as player gets close to the foreground white cat, it startles & bolts behind the house!
-        if (wt.kind === 'whitecat' && !h.whiteCatFled && g.player.position.distanceTo(w.cats[2].position) < 1.48) {
+        // As soon as player walks right up close to the foreground white cat, it startles & bolts around the house!
+        if (wt.kind === 'whitecat' && !h.whiteCatFled && g.player.position.distanceTo(w.cats[2].position) < 1.12) {
           this.triggerWhiteCatFlee();
         } else if (p >= 1) {
           if (wt.kind === 'whitecat') {
@@ -1450,7 +1450,7 @@ export class StopDirector {
         }
       }
 
-      // White cat playful sprint around the right side of the house to sit smugly behind the back corner!
+      // White cat playful sprint cleanly around the right side of the house (hugging real terrain!) to sit smugly peeking out behind the back-right corner!
       if (h.whiteCatFlee) {
         const wf = h.whiteCatFlee;
         const cat = w.cats[2];
@@ -1458,6 +1458,8 @@ export class StopDirector {
         const p = clamp(wf.time / wf.duration, 0, 1);
         const pos = wf.curve.getPointAt(smooth(p));
         const ahead = wf.curve.getPointAt(Math.min(1, smooth(p) + 0.04));
+        const onYard = Math.abs(pos.x) <= 4.75 && pos.z >= -45.85 && pos.z <= -39.75;
+        pos.y = Math.max(ground(pos.x, pos.z), onYard ? w.houseY + 0.06 : -999) + 0.02;
         cat.position.copy(pos);
         if (p < 0.96) {
           cat.userData.running = true;
@@ -1468,8 +1470,8 @@ export class StopDirector {
           faceFigureSmooth(g.player, pos, dt, 6);
         } else {
           cat.userData.running = false;
-          // Turns around smugly sitting behind the house!
-          cat.rotation.y = Math.PI * 0.2;
+          // Turns around smugly sitting behind the back-right corner of the house (clearly visible when zoomed out!)
+          cat.rotation.y = -Math.PI * 0.25;
           h.whiteCatFlee = null;
         }
       }
@@ -2849,17 +2851,19 @@ export class StopDirector {
 
     const cat = w.cats[2];
     const y = w.houseY + 0.08;
+    // Obstacle-free flee route: stays inside the dry-stone wall & clear of geranium tins, runs around right side of house, and sits visibly behind the back-right corner!
     const fleePts = [
       cat.position.clone(),
-      V(3.2, y, -41.4),
-      V(4.95, y, -44.1),
-      V(5.05, y, -49.4),
-      V(3.7, y, -52.4),
+      V(2.85, y, -41.45),
+      V(4.65, y, -42.55),
+      V(5.35, ground(5.35, -46.2) + 0.02, -46.2),
+      V(5.55, ground(5.55, -50.2) + 0.02, -50.2),
+      V(5.15, ground(5.15, -51.85) + 0.02, -51.85),
     ];
     h.whiteCatFlee = {
       time: 0,
-      duration: 2.8,
-      curve: new THREE.CatmullRomCurve3(fleePts, false, 'catmullrom', 0.25),
+      duration: 2.7,
+      curve: new THREE.CatmullRomCurve3(fleePts, false, 'centripetal'),
     };
     cat.userData.running = true;
     g.audio.sfx('meow');

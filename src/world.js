@@ -1965,7 +1965,7 @@ export class World {
     const catSpecs = [
       { pos: [-1.85, y + 0.08, -42.7], yaw: 0.45, col: C.dusk, accent: C.chalk, stripes: false, biscuits: false, angry: true },
       { pos: [1.95, y + 0.08, -42.8], yaw: -0.55, col: '#d87b34', accent: C.cream, stripes: true, biscuits: true, angry: false },
-      { pos: [0.95, y + 0.08, -40.85], yaw: -0.35, col: C.chalk, accent: C.sand, stripes: false, biscuits: false, angry: false },
+      { pos: [0.95, y + 0.08, -41.15], yaw: -0.35, col: C.chalk, accent: C.sand, stripes: false, biscuits: false, angry: false },
     ];
     catSpecs.forEach((cs, i) => {
       const cat = makeCat(cs.col, cs.accent, { stripes: cs.stripes, angry: cs.angry });
@@ -2468,7 +2468,8 @@ export class World {
       }
       item._box.getCenter(this.markerCenter);
       const bob = Math.sin(this.time * Math.PI * 2 * 1.35 + item.id.length) * pixelWorld * 2.2;
-      marker.position.set(this.markerCenter.x, item._box.max.y + 0.34 + bob, this.markerCenter.z);
+      const markerY = item.id === 'blue-door' ? this.markerCenter.y + 0.15 : item._box.max.y + 0.34;
+      marker.position.set(this.markerCenter.x, markerY + bob, this.markerCenter.z);
       const isHint = item.id === hint;
       const isHover = item.id === game.interactions.hovered;
       const baseMul = item.quietMarker ? 0.68 : 1.0;

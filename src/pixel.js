@@ -493,9 +493,11 @@ export class CameraRig {
     this.stop = n;
     this.freeOrbit = n === 0;
     this.dragEase = { fromYaw: this.dragYaw, fromPitch: this.dragPitch, time: 0 };
-    // Gently ease any custom zoom back toward curated stop framing on stop entry (player can freely zoom again anytime!)
-    this.desiredUserZoom = 1.0;
-    if (immediate) this.userZoom = 1.0;
+    // Respect the player's chosen zoom when entering a stop; only reset on immediate snap (jump/restart)!
+    if (immediate) {
+      this.desiredUserZoom = 1.0;
+      this.userZoom = 1.0;
+    }
     const view = this.world.stopViews[n];
     this.baseTarget.copy(view.target);
     this.desiredTarget.copy(view.target);
