@@ -712,14 +712,28 @@ export class CameraRig {
     this.applyCamera();
   }
 
-  updateFreeRoam(dt, pos, vx = 0, vz = 0, seated = false) {
+  faceFreeRoamSeat(seat) {
+    if (!seat?.lookAt || !seat?.pos) return;
+    const dx = seat.lookAt.x - seat.pos.x;
+    const dz = seat.lookAt.z - seat.pos.z;
+    if (dx * dx + dz * dz < 1e-4) return;
+    // Smoothly frame camera behind the seated player looking OUT across the scenic viewpoint (while keeping 360° drag free!)
+    this.desiredYaw = Math.atan2(-dx, -dz) + 0.16;
+    this.dragYaw = 0;
+    this.dragPitch = 0;
+  }
+
+  updateFreeRoam(dt, pos, vx = 0, vz = 0, seat = null) {
     this.time += dt;
     if (this.fixed || this.walk) return;
-    // Gentle camera lead in the direction of travel + scenic wider framing when seated on a balcony lookout chair!
-    this.desiredHeight = seated ? 16.4 : 13.8;
-    this.desiredTarget.set(pos.x + vx * 0.22, pos.y + (seated ? 1.05 : 0.95), pos.z + vz * 0.22);
-    const kt = ease(dt, seated ? 0.36 : 0.2);
-    const ky = ease(dt, 0.16);
+    const seated = !!seat;
+    // Gentle camera lead in the direction of travel + scenic framing when seated at a balcony / ridge / minaret viewpoint!
+    this.desiredHeight = seated ? seat.viewHeight || 17.5 : 13.8;
+    const lookBiasX = seated && seat.lookAt ? clamp((seat.lookAt.x - pos.x) * 0.18, -3.5, 3.5) : vx * 0.22;
+    const lookBiasZ = seated && seat.lookAt ? clamp((seat.lookAt.z - pos.z) * 0.18, -3.5, 3.5) : vz * 0.22;
+    this.desiredTarget.set(pos.x + lookBiasX, pos.y + (seated ? 1.05 : 0.95), pos.z + lookBiasZ);
+    const kt = ease(dt, seated ? 0.45 : 0.2);
+    const ky = ease(dt, seated ? 0.42 : 0.16);
     const kz = ease(dt, 0.14);
     this.target.lerp(this.desiredTarget, kt);
     this.viewHeight = lerp(this.viewHeight, this.desiredHeight, ky);

@@ -168,6 +168,10 @@ export class World {
     this.walkSurfaces.push({ kind: 'circle', cx, cz, r, topY });
   }
 
+  addWalkSpiral(cx, cz, rMin, rMax, yBottom, yTop, startAngle, totalAngle) {
+    this.walkSurfaces.push({ kind: 'spiral', cx, cz, rMin, rMax, yBottom, yTop, startAngle, totalAngle });
+  }
+
   // Natural flat-topped Anatolian limestone stepping rock that players can jump onto & climb!
   addClimbRock(x, z, r = 0.72, h = 0.56, parent = this.village) {
     const gy = ground(x, z);
@@ -212,6 +216,23 @@ export class World {
           if (dx * dx + dz * dz <= s.r * s.r && s.topY <= curY + 0.62) {
             best = Math.max(best, s.topY);
           }
+        } else if (s.kind === 'spiral') {
+          const dx = x - s.cx;
+          const dz = z - s.cz;
+          const r = Math.hypot(dx, dz);
+          if (r >= s.rMin && r <= s.rMax) {
+            const ang = Math.atan2(dz, dx);
+            const delta = (((ang - s.startAngle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            for (let k = 0; k <= 2; k++) {
+              const theta = delta + k * Math.PI * 2;
+              if (theta > s.totalAngle + 0.26) continue;
+              const u = clamp(theta / s.totalAngle, 0, 1);
+              const sy = lerp(s.yBottom, s.yTop, u);
+              if (sy <= curY + 0.82 && sy >= curY - 1.35) {
+                best = Math.max(best, sy);
+              }
+            }
+          }
         } else {
           const dx = x - s.cx;
           const dz = z - s.cz;
@@ -238,17 +259,49 @@ export class World {
   resolveFreeRoamCollisions(pos, radius = 0.3, curY = null) {
     this.resolveCollisions(pos, radius, curY);
     const extras = [
-      { cx: 0, cz: -48.0, hw: 4.15, hd: 3.85 }, // Great-grandfather's house exterior
-      { cx: -28.6, cz: -24.5, hw: 2.85, hd: 2.9 }, // Left hillside village mosque
+      { kind: 'box', cx: 0, cz: -48.0, hw: 4.15, hd: 3.85, yaw: 0 }, // Great-grandfather's house exterior
+      { kind: 'box', cx: -29.0, cz: -24.5, hw: 2.2, hd: 2.25, yaw: 0.34 }, // Left hillside village mosque prayer hall
     ];
+    if (this.minaretWorldCenter) {
+      extras.push({ kind: 'circle', cx: this.minaretWorldCenter.x, cz: this.minaretWorldCenter.z, r: 0.44 });
+    }
     for (const ob of extras) {
-      const dx = pos.x - ob.cx;
-      const dz = pos.z - ob.cz;
-      const ox = ob.hw + radius - Math.abs(dx);
-      const oz = ob.hd + radius - Math.abs(dz);
-      if (ox > 0 && oz > 0) {
-        if (ox < oz) pos.x += dx >= 0 ? ox : -ox;
-        else pos.z += dz >= 0 ? oz : -oz;
+      if (ob.kind === 'circle') {
+        const dx = pos.x - ob.cx;
+        const dz = pos.z - ob.cz;
+        const minD = ob.r + radius;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < minD * minD && d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          pos.x = ob.cx + (dx / d) * minD;
+          pos.z = ob.cz + (dz / d) * minD;
+        }
+      } else if (ob.yaw) {
+        const dx = pos.x - ob.cx;
+        const dz = pos.z - ob.cz;
+        const c = Math.cos(ob.yaw);
+        const sn = Math.sin(ob.yaw);
+        const lx = dx * c - dz * sn;
+        const lz = dx * sn + dz * c;
+        const ox = ob.hw + radius - Math.abs(lx);
+        const oz = ob.hd + radius - Math.abs(lz);
+        if (ox > 0 && oz > 0) {
+          let nlx = lx;
+          let nlz = lz;
+          if (ox < oz) nlx += lx >= 0 ? ox : -ox;
+          else nlz += lz >= 0 ? oz : -oz;
+          pos.x = ob.cx + nlx * c + nlz * sn;
+          pos.z = ob.cz - nlx * sn + nlz * c;
+        }
+      } else {
+        const dx = pos.x - ob.cx;
+        const dz = pos.z - ob.cz;
+        const ox = ob.hw + radius - Math.abs(dx);
+        const oz = ob.hd + radius - Math.abs(dz);
+        if (ox > 0 && oz > 0) {
+          if (ox < oz) pos.x += dx >= 0 ? ox : -ox;
+          else pos.z += dz >= 0 ? oz : -oz;
+        }
       }
     }
     // Tight, scenic Anatolian village border framed naturally by the surrounding woods
@@ -599,26 +652,45 @@ export class World {
       this.addClimbRock(rx, rz, rr, rh);
     }
 
-    // Cozy hillside lookout chair beside the village mosque overlooking the whole valley!
-    const mx = -25.4;
-    const mz = -23.6;
-    const my = ground(mx, mz);
-    const mChair = new THREE.Group();
-    mChair.position.set(mx, my, mz);
-    mChair.rotation.y = 1.25;
-    this.village.add(mChair);
-    for (const lx of [-0.22, 0.22]) {
-      for (const lz of [-0.22, 0.22]) place(cyl(0.026, 0.03, 0.42, C.woodDark, 6), lx, 0.21, lz, mChair);
-    }
-    place(box(0.54, 0.06, 0.5, C.woodWarm), 0, 0.42, 0, mChair);
-    place(box(0.46, 0.06, 0.42, C.kilimRed), 0, 0.47, 0.01, mChair);
-    place(box(0.54, 0.48, 0.06, C.woodDark), 0, 0.68, -0.22, mChair);
-    this.roamSeats.push({
-      pos: V(mx, my + 0.14, mz),
-      standPos: V(mx + 0.75, ground(mx + 0.75, mz + 0.25), mz + 0.25),
-      lookAt: V(mx + 8.0, my + 0.14, mz + 2.6),
-      label: 'hillside lookout chair',
-    });
+    // Scenic lookout chairs facing ALL sides of the village (east, west, and uphill north!)
+    const addLookoutChair = (cx, cz, yaw, lookAt, label, viewHeight = 17.5, withDeck = false) => {
+      const cy = ground(cx, cz);
+      const seatGroup = new THREE.Group();
+      seatGroup.position.set(cx, cy, cz);
+      seatGroup.rotation.y = yaw;
+      this.village.add(seatGroup);
+      let lift = 0;
+      if (withDeck) {
+        place(box(1.85, 0.24, 1.65, C.woodWarm), 0, 0.12, 0, seatGroup);
+        for (const px of [-0.8, 0.8]) {
+          for (const pz of [-0.7, 0.7]) place(cyl(0.05, 0.06, 0.6, C.woodDark, 6), px, -0.15, pz, seatGroup);
+        }
+        lift = 0.24;
+        this.addWalkBox(cx, cz, 1.9, 1.7, cy + lift, yaw);
+      }
+      for (const lx of [-0.22, 0.22]) {
+        for (const lz of [-0.22, 0.22]) place(cyl(0.026, 0.03, 0.42, C.woodDark, 6), lx, lift + 0.21, lz, seatGroup);
+      }
+      place(box(0.54, 0.06, 0.5, C.woodWarm), 0, lift + 0.42, 0, seatGroup);
+      place(box(0.46, 0.06, 0.42, C.kilimRed), 0, lift + 0.47, 0.01, seatGroup);
+      place(box(0.54, 0.48, 0.06, C.woodDark), 0, lift + 0.68, -0.22, seatGroup);
+      const sx = cx + Math.sin(yaw) * 0.72;
+      const sz = cz + Math.cos(yaw) * 0.72;
+      this.roamSeats.push({
+        pos: V(cx, cy + lift + 0.14, cz),
+        standPos: V(sx, Math.max(ground(sx, sz), cy + lift), sz),
+        lookAt,
+        label,
+        viewHeight,
+      });
+    };
+
+    // 1) Mosque hillside lookout chair facing EAST across the river & village
+    addLookoutChair(-25.8, -20.8, 1.25, V(-6.0, ground(-6, -15), -15.5), 'mosque lookout chair', 18.0, false);
+    // 2) East ridge wooden overlook deck & chair facing WEST across the football pitch, river & mosque!
+    addLookoutChair(19.2, -5.8, -1.68, V(-12.0, ground(-12, -10), -10.0), 'east ridge viewpoint', 19.5, true);
+    // 3) Lower arrival uphill lookout chair facing NORTH up the entire winding Yokuş village hill!
+    addLookoutChair(4.7, 38.2, Math.PI, V(0.0, ground(0, 0), 0.0), 'uphill village viewpoint', 18.5, false);
 
     // Masked swaying grass & wildflowers (ZERO tufts in water, road, pitch, or buildings!)
     this.scene.add(makeGrass(this.rng, this.mask, IS_MOBILE ? 1600 : 4200));
@@ -626,8 +698,32 @@ export class World {
   }
 
   buildVillageLife() {
-    // Charming very small Anatolian village mosque with slender minaret on the left hillside (seen when zoomed out!)
+    // Charming small Anatolian village mosque with climbable spiral minaret & panoramic şerefe balcony!
     this.mosque = makeVillageMosque(this.village, -29.0, -24.5, this.windowLights);
+    const mm = this.mosque.userData.minaretMeta;
+    if (mm) {
+      const my = this.mosque.position.y;
+      const c = Math.cos(mm.turn);
+      const s = Math.sin(mm.turn);
+      const minX = this.mosque.position.x + mm.mx * c + mm.mz * s;
+      const minZ = this.mosque.position.z - mm.mx * s + mm.mz * c;
+      this.minaretWorldCenter = V(minX, my, minZ);
+      const startWorldAngle = mm.startLocalAngle - mm.turn;
+      this.addWalkSpiral(minX, minZ, 0.44, 1.44, my + mm.yBottom, my + mm.yTop, startWorldAngle, mm.totalAngle);
+      this.addWalkCircle(minX, minZ, mm.balconyR + 0.12, my + mm.yTop);
+      // Panoramic minaret şerefe lookout spot facing out over the ENTIRE village!
+      const viewAng = startWorldAngle + mm.totalAngle + 0.95;
+      const sx = minX + Math.cos(viewAng) * 0.92;
+      const sz = minZ + Math.sin(viewAng) * 0.92;
+      const stAng = startWorldAngle + mm.totalAngle + 0.35;
+      this.roamSeats.push({
+        pos: V(sx, my + mm.yTop + 0.08, sz),
+        standPos: V(minX + Math.cos(stAng) * 0.92, my + mm.yTop, minZ + Math.sin(stAng) * 0.92),
+        lookAt: V(2.0, my + mm.yTop - 3.0, -14.0),
+        label: 'minaret lookout',
+        viewHeight: 25.0,
+      });
+    }
 
     // Wooden power poles cleanly placed clear of all stops (stork nests on the arrival pole!)
     const poleCoords = [

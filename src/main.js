@@ -513,6 +513,7 @@ class YokusGame {
       this.player.position.copy(seat.pos);
       setPose(this.player, 'sit');
       faceFigure(this.player, seat.lookAt);
+      this.rig.faceFreeRoamSeat(seat);
       this.audio.sfx('thump');
       this.updateModeHud();
     } else if (act.kind === 'tea') {
@@ -599,7 +600,7 @@ class YokusGame {
     if (keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('a')) inRight -= 1;
     const jogging = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('shift');
 
-    // If seated on a balcony/lookout chair, stay cozy watching the village until WASD / Space / E stands up!
+    // If seated on a balcony/ridge/minaret viewpoint, stay cozy watching the village until WASD / Space / E stands up!
     if (fr.seated) {
       if (inFwd !== 0 || inRight !== 0) {
         this.standFromFreeRoamSeat();
@@ -607,7 +608,7 @@ class YokusGame {
         this.player.position.copy(fr.seated.pos);
         if (this.player.userData.pose !== 'sit') setPose(this.player, 'sit');
         faceFigureSmooth(this.player, fr.seated.lookAt, dt, 8);
-        this.rig.updateFreeRoam(dt, this.player.position, 0, 0, true);
+        this.rig.updateFreeRoam(dt, this.player.position, 0, 0, fr.seated);
         return;
       }
     }
@@ -908,14 +909,17 @@ class YokusGame {
           this.world.animateArrival(this.arrivalTime);
         }
         if (this.state.mode === 'walking') {
+          this.stops.updatePitchBackground(dt);
           const to = this.state.toStop;
           if (this.rig.updateWalk(dt)) {
             if (this.world.approachSpots?.[to]) this.enterApproach(to);
             else this.enterStop(to);
           }
         } else if (this.state.mode === 'approach') {
+          this.stops.updatePitchBackground(dt);
           this.rig.updateLook(dt, 'approach');
         } else if (this.state.mode === 'entering') {
+          this.stops.updatePitchBackground(dt);
           const to = this.state.toStop;
           if (this.rig.updateWalk(dt)) this.enterStop(to);
         } else if (this.state.mode === 'interact') {

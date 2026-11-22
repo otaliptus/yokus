@@ -1571,25 +1571,96 @@ export function makeVillageMosque(parent, x, z, windowLights = []) {
     addWindow(eastWinGroup, sz, 0.45 + 1.48, w * 0.5 + 0.04, 0.62, 0.84, windowLights);
   }
 
-  // Slender Anatolian minaret rising right beside the northeast corner of the small mosque!
-  const mx = w * 0.5 + 0.52;
-  const mz = d * 0.5 - 0.55;
+  // Slender Anatolian minaret rising beside the northeast corner with a climbable spiral staircase & walkable şerefe balcony!
+  const mx = w * 0.5 + 1.35;
+  const mz = d * 0.5 - 0.35;
+  // Low stone plinth connecting mosque courtyard cleanly to the minaret base
+  place(box(1.5, 0.45, 1.4, C.stoneMid, 0.03), w * 0.5 + 0.65, 0.16, mz, g);
   // Square cut-stone base (kaide) + chamfered transition
-  place(box(1.18, 2.2, 1.18, C.stoneLight, 0.025), mx, 0.45 + 1.1, mz, g);
-  place(cyl(0.46, 0.64, 0.65, C.chalk, 8), mx, 0.45 + 2.52, mz, g);
+  place(box(1.12, 2.2, 1.12, C.stoneLight, 0.025), mx, 0.45 + 1.1, mz, g);
+  place(cyl(0.45, 0.62, 0.65, C.chalk, 8), mx, 0.45 + 2.52, mz, g);
   // Whitewashed cylindrical shaft (gövde)
-  place(cyl(0.38, 0.46, 4.9, C.chalk, 12), mx, 0.45 + 5.25, mz, g);
-  // Carved balcony (şerefe) with stone parapet
-  place(cyl(0.66, 0.44, 0.28, C.stoneLight, 12), mx, 0.45 + 7.65, mz, g);
-  place(cyl(0.68, 0.66, 0.34, C.chalk, 12), mx, 0.45 + 7.95, mz, g);
-  // Upper lantern drum (petek) + conical lead cap (külah) + gold finial!
-  place(cyl(0.28, 0.33, 1.55, C.chalk, 10), mx, 0.45 + 8.85, mz, g);
-  place(mesh(new THREE.ConeGeometry(0.42, 1.75, 12), '#5b6a7c'), mx, 0.45 + 10.48, mz, g);
-  place(cyl(0.022, 0.032, 0.48, C.gold, 6), mx, 0.45 + 11.55, mz, g);
-  place(sphere(0.08, C.gold, 0), mx, 0.45 + 11.72, mz, g);
+  place(cyl(0.38, 0.45, 4.95, C.chalk, 12), mx, 0.45 + 5.28, mz, g);
 
-  // Small low stone courtyard wall & cypress beside the mosque
+  // Wider walkable carved balcony (şerefe) with stone corbel & low parapet rim (open where spiral stairs arrive!)
+  const balconyY = 8.15;
+  const balconyR = 1.34;
+  place(cyl(balconyR, 0.46, 0.42, C.stoneLight, 16), mx, balconyY - 0.25, mz, g);
+  place(cyl(balconyR, balconyR, 0.14, C.chalk, 16), mx, balconyY - 0.05, mz, g);
+  const startLocalAngle = 0.25;
+  const totalAngle = Math.PI * 3.0;
+  const topArriveAngle = startLocalAngle + totalAngle;
+  // Parapet posts & curved rail segments around şerefe (leaving a clean open entry gap at topArriveAngle!)
+  const railCount = 14;
+  for (let i = 0; i < railCount; i++) {
+    const a = (i / railCount) * Math.PI * 2;
+    const diff = Math.abs(Math.atan2(Math.sin(a - topArriveAngle), Math.cos(a - topArriveAngle)));
+    if (diff < 0.42) continue;
+    const px = mx + Math.cos(a) * (balconyR - 0.08);
+    const pz = mz + Math.sin(a) * (balconyR - 0.08);
+    place(cyl(0.032, 0.036, 0.62, C.stoneLight, 6), px, balconyY + 0.32, pz, g);
+    const a2 = ((i + 1) / railCount) * Math.PI * 2;
+    const diff2 = Math.abs(Math.atan2(Math.sin(a2 - topArriveAngle), Math.cos(a2 - topArriveAngle)));
+    if (diff2 >= 0.42) {
+      g.add(
+        beamBetween(
+          V(px, balconyY + 0.62, pz),
+          V(mx + Math.cos(a2) * (balconyR - 0.08), balconyY + 0.62, mz + Math.sin(a2) * (balconyR - 0.08)),
+          0.036,
+          C.woodWarm
+        )
+      );
+    }
+  }
+
+  // Climbable spiral wooden-and-stone staircase winding 1.5 turns right up the minaret shaft to the şerefe!
+  const rSpiral = 0.94;
+  const yBottom = 0.25;
+  const stepCount = 30;
+  let prevRailPt = null;
+  for (let i = 0; i <= stepCount; i++) {
+    const u = i / stepCount;
+    const a = startLocalAngle + u * totalAngle;
+    const sy = lerp(yBottom, balconyY - 0.04, u);
+    const sx = mx + Math.cos(a) * rSpiral;
+    const sz = mz + Math.sin(a) * rSpiral;
+    const tread = place(box(0.68, 0.09, 0.34, i % 4 === 0 ? C.stoneLight : C.woodWarm), sx, sy, sz, g);
+    tread.rotation.y = -a;
+    // Support bracket anchored into the minaret shaft
+    g.add(beamBetween(V(mx + Math.cos(a) * 0.42, sy - 0.28, mz + Math.sin(a) * 0.42), V(mx + Math.cos(a) * (rSpiral + 0.28), sy - 0.04, mz + Math.sin(a) * (rSpiral + 0.28)), 0.026, C.woodDark));
+    // Outer spiral handrail posts & continuous sloped rail
+    const rx = mx + Math.cos(a) * (rSpiral + 0.3);
+    const rz = mz + Math.sin(a) * (rSpiral + 0.3);
+    const railPt = V(rx, sy + 0.68, rz);
+    if (i % 2 === 0) {
+      place(cyl(0.022, 0.026, 0.68, C.woodDark, 5), rx, sy + 0.34, rz, g);
+    }
+    if (prevRailPt) {
+      g.add(beamBetween(prevRailPt, railPt, 0.028, C.woodWarm));
+    }
+    prevRailPt = railPt;
+  }
+
+  // Upper lantern drum (petek) + conical lead cap (külah) + gold finial!
+  place(cyl(0.28, 0.33, 1.55, C.chalk, 10), mx, balconyY + 0.82, mz, g);
+  place(mesh(new THREE.ConeGeometry(0.42, 1.75, 12), '#5b6a7c'), mx, balconyY + 2.45, mz, g);
+  place(cyl(0.022, 0.032, 0.48, C.gold, 6), mx, balconyY + 3.52, mz, g);
+  place(sphere(0.08, C.gold, 0), mx, balconyY + 3.7, mz, g);
+
+  // Small low stone courtyard wall beside the mosque
   place(box(0.45, 0.52, 2.4, C.stoneLight), -w * 0.5 - 0.6, 0.52, d * 0.5 + 0.2, g);
+
+  g.userData.minaretMeta = {
+    mx,
+    mz,
+    turn: 0.34,
+    rSpiral,
+    yBottom,
+    yTop: balconyY + 0.02,
+    startLocalAngle,
+    totalAngle,
+    balconyR,
+  };
   return g;
 }
 

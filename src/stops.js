@@ -83,6 +83,7 @@ export class StopDirector {
       bestStreak: 0,
       unlimitedMode: false,
       lapRunner: null,
+      ballReturning: false,
       wallJumped: false,
       wallChecked: false,
       keeperDived: false,
@@ -421,7 +422,7 @@ export class StopDirector {
   canLeave(n) {
     const g = this.game;
     if (n === 1) return !g.tea.unlimitedMode && g.tea.firstGlass && g.tea.stage === 'idle';
-    if (n === 2) return !g.football.unlimitedMode && g.football.afterMemory && (g.football.phase === 'aim' || g.football.phase === 'reset');
+    if (n === 2) return !g.football.unlimitedMode && g.football.afterMemory && (g.football.phase === 'aim' || g.football.phase === 'reset' || g.football.phase === 'jogback');
     if (n === 3) return !g.river.unlimitedMode && g.river.memoryDone && g.river.caught >= 1 && !g.river.holdingFish && !g.river.droppingFish;
     if (n === 4) return !g.bread.unlimitedMode && g.bread.bites >= 3 && g.bread.memoryTime <= 0 && !g.bread.hug;
     return false;
@@ -472,6 +473,13 @@ export class StopDirector {
       const n = Number(id.split('-')[1]);
       if (this.canLeave(n) && g.state.stop === n) {
         w.popInteractable(id);
+        if (n === 2) {
+          // Never leave the football stalled mid-net/mid-pitch when leaving Stop 2!
+          g.football.ballReturning = true;
+          g.football.phase = 'aim';
+          g.football.charging = false;
+          g.football.memoryAt = 0;
+        }
         if (n === 3) {
           // Gently prop the borrowed rod back onto its wooden rest for the village kid!
           w.rodPivot.position.copy(w.rodRestPos);
@@ -1210,6 +1218,11 @@ export class StopDirector {
     // Ease white transition flash back to 0 during normal play
     if (g.state.mode !== 'ending' && g.state.white > 0) {
       g.state.white = Math.max(0, g.state.white - dt * 1.3);
+    }
+
+    // Always keep celebrating football kid & returning ball moving smoothly even after the player leaves Stop 2!
+    if (g.state.mode !== 'interact' || g.state.stop !== 2) {
+      this.updatePitchBackground(dt);
     }
 
     if (g.state.mode === 'ending') {
@@ -1990,15 +2003,12 @@ export class StopDirector {
   }
 
   // STOP 2: REALISTIC, JUICY FREE KICKS + BANGER-GOAL 2-LAP AIRPLANE RUNNER + CHILDHOOD FLASHBACK!
-  updateFootball(dt) {
+  updatePitchBackground(dt) {
     const g = this.game;
     const w = g.world;
     const f = g.football;
-    const gx = w.goal.position.x;
-    const gy = w.goal.position.y;
-    const gz = w.goal.position.z;
-
-    // Keep celebrating pitch kid running AT MOST 2 joyful airplane-arms laps per goal!
+    if (!f) return;
+    // Keep any celebrating pitch kid smoothly finishing his lap & jogging back to sideline (never freezing when leaving Stop 2!)
     if (f.lapRunner && f.phase !== 'memory') {
       const lr = f.lapRunner;
       lr.time += dt;
@@ -2018,7 +2028,6 @@ export class StopDirector {
           w.spawnPuff(pos.clone().add(V(0, 0.06, 0)), 4, '#e6c486');
         }
       } else {
-        // Jog gently back to touchline home spot
         const home = kid.userData.homePos;
         if (home && kid.position.distanceTo(home) > 0.25) {
           kid.position.lerp(home, 1 - Math.exp(-dt * 4.5));
@@ -2036,6 +2045,28 @@ export class StopDirector {
         }
       }
     }
+    // Smoothly roll the ball back to the free-kick spot if the player left Stop 2 right after a shot!
+    if (f.ballReturning) {
+      w.ball.position.lerp(w.ballSpot, 1 - Math.exp(-dt * 8));
+      w.ball.position.y = Math.max(w.pitchCenter.y + 0.24, w.ball.position.y);
+      w.ball.rotation.x -= dt * 8;
+      if (w.ball.position.distanceTo(w.ballSpot) < 0.06) {
+        w.ball.position.copy(w.ballSpot);
+        f.ballReturning = false;
+      }
+    }
+  }
+
+  updateFootball(dt) {
+    const g = this.game;
+    const w = g.world;
+    const f = g.football;
+    const gx = w.goal.position.x;
+    const gy = w.goal.position.y;
+    const gz = w.goal.position.z;
+
+    // Keep celebrating pitch kid running AT MOST 2 joyful airplane-arms laps per goal!
+    this.updatePitchBackground(dt);
 
     if (f.phase === 'aim') {
       faceFigureSmooth(g.player, w.goal.position, dt, 6);
@@ -2187,12 +2218,18 @@ export class StopDirector {
         f.velocity.z = 0;
       }
 
-      if ((f.goal && f.flightTime > 0.85) || f.flightTime > 1.55 || w.ball.position.z < gz - 2.6 || f.velocity.length() < 0.45) {
+      if (
+        (f.goal && f.flightTime > 0.75) ||
+        (f.blocked && f.flightTime > 1.05) ||
+        f.flightTime > 1.85 ||
+        w.ball.position.z < gz - 2.6 ||
+        (f.flightTime > 0.45 && f.velocity.length() < 0.65 && w.ball.position.y <= floor + 0.08)
+      ) {
         g.audio.sfx(f.goal ? 'cheer' : 'groan');
         f.phase = 'reset';
-        f.resetAt = g.time + 1.05;
+        f.resetAt = g.time + 0.55;
         if (f.goal) {
-          // Opposing wall slumps in disbelief; sideline spectators jump & cheer; kid #1 sprints 2 FULL LAPS around the pitch!
+          // Opposing wall slumps in disbelief; sideline spectators jump & cheer; kid #1 sprints at most 2 laps!
           w.wall.forEach((k) => triggerAction(k, 'slump', 2.0, g.time));
           w.pitchKids.forEach((k, idx) => {
             if (idx !== 1) triggerAction(k, 'cheer', 2.2, g.time);
@@ -2216,14 +2253,33 @@ export class StopDirector {
     }
 
     if (f.phase === 'reset') {
+      // Keep gentle ball gravity & grass rolling during the brief reset beat so the ball NEVER stalls frozen mid-air!
+      const floor = w.pitchCenter.y + 0.24;
+      if (w.ball.position.y > floor || f.velocity.lengthSq() > 0.02) {
+        f.velocity.y -= 9.81 * dt;
+        w.ball.position.addScaledVector(f.velocity, dt);
+        if (w.ball.position.y < floor) {
+          w.ball.position.y = floor;
+          f.velocity.y = Math.abs(f.velocity.y) > 0.8 ? Math.abs(f.velocity.y) * 0.35 : 0;
+          f.velocity.x *= Math.exp(-dt * 4.5);
+          f.velocity.z *= Math.exp(-dt * 4.5);
+        }
+        if (f.goal && w.ball.position.z < gz - 1.15) {
+          w.ball.position.z = gz - 1.15;
+          f.velocity.z = 0;
+        }
+        w.ball.rotation.x += (f.velocity.z * dt) / 0.22;
+        w.ball.rotation.z -= (f.velocity.x * dt) / 0.22;
+      }
       if (f.memoryAt && g.time >= f.memoryAt) {
         f.memoryAt = 0;
         this.startFootballMemory();
       } else if (!f.memoryAt && g.time >= f.resetAt) {
-        // Smooth jog back to free-kick stance (ZERO snap!)
+        // Smooth jog back to free-kick stance while ball rolls smoothly back to the spot (ZERO stall!)
         f.phase = 'jogback';
         f.jogTime = 0;
         f.jogStart = g.player.position.clone();
+        f.ballReturnStart = w.ball.position.clone();
         setPose(g.player, 'jog');
         w.keeper.userData.action = 'keeper-ready';
         w.keeper.userData.actionUntil = Infinity;
@@ -2232,10 +2288,17 @@ export class StopDirector {
 
     if (f.phase === 'jogback') {
       f.jogTime += dt;
-      const p = clamp(f.jogTime / 1.05, 0, 1);
-      g.player.position.copy(f.jogStart).lerp(w.playerSpots[2].pos, smooth(p));
+      const p = clamp(f.jogTime / 0.95, 0, 1);
+      const e = smooth(p);
+      g.player.position.copy(f.jogStart).lerp(w.playerSpots[2].pos, e);
       w.keeper.position.x = lerp(w.keeper.position.x, gx, 1 - Math.exp(-dt * 6));
-      w.ball.position.lerp(w.ballSpot, 1 - Math.exp(-dt * 10));
+      if (f.ballReturnStart) {
+        w.ball.position.copy(f.ballReturnStart).lerp(w.ballSpot, e);
+        w.ball.position.y = Math.max(w.pitchCenter.y + 0.24, w.ball.position.y);
+      } else {
+        w.ball.position.lerp(w.ballSpot, 1 - Math.exp(-dt * 10));
+      }
+      w.ball.rotation.x -= dt * 9 * (1 - p);
       faceFigureSmooth(g.player, p < 0.7 ? w.playerSpots[2].pos : w.goal.position, dt, 8);
       if (p >= 1) {
         setPose(g.player, 'stand');
