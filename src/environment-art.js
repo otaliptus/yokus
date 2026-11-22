@@ -29,7 +29,7 @@ import { applyToonShader } from './art-shader.js';
 // Rich emerald/olive greens around the river, irrigation ditch, orchards & village gardens;
 // warm golden-ochre & sun-baked straw on the outer steppe hills — never flat mustard.
 export function makeTerrain(mask) {
-  const segs = IS_MOBILE ? 96 : 140;
+  const segs = IS_MOBILE ? 72 : 140;
   const geo = new THREE.PlaneGeometry(210, 210, segs, segs);
   geo.rotateX(-Math.PI / 2);
   const p = geo.attributes.position;
@@ -1297,7 +1297,8 @@ export function makePerimeterForest(rng) {
   const placements = [];
   const riverPad = RIVER_HALF_WIDTH + 3.2;
 
-  for (let i = 0; i < 420; i++) {
+  const treeCount = IS_MOBILE ? 200 : 420;
+  for (let i = 0; i < treeCount; i++) {
     const angle = rng() * Math.PI * 2;
     // Village core is an oval centered at (1, -5) with rx ~ 23, rz ~ 52
     const ring = rng();

@@ -266,8 +266,8 @@ export class RendererPipeline {
       const dpr = window.devicePixelRatio || 1;
       const devW = Math.round(innerWidth * dpr);
       const devH = Math.round(innerHeight * dpr);
-      // Target ~256 art rows on desktop, ~208 rows on mobile (crisper cozy pixel-art & ~34% less mobile GPU fill!)
-      const targetRows = IS_MOBILE ? 208 : 256;
+      // Target ~256 art rows on desktop, ~176 rows on mobile (crisper pixel-art & ~50% less mobile GPU fill so audio stays silky!)
+      const targetRows = IS_MOBILE ? 176 : 256;
       const scale = Math.max(2, Math.round(devH / targetRows));
       this.px = scale / dpr;
       this.w = Math.max(1, Math.ceil(devW / scale));
@@ -325,8 +325,8 @@ export class RendererPipeline {
     this.outline.uniforms.orthographic.value = this.camera.isOrthographicCamera ? 1 : 0;
     this.upshift.copy(this.camera.userData.pixelSnapRemainder || this._zeroVec);
 
-    // On mobile, update shadow map every 2nd frame (30Hz shadows) to cut mobile Safari GPU time significantly!
-    const updateShadow = !IS_MOBILE || this.shadowDirty || (this.frameCount & 1) === 0;
+    // On mobile, update shadow map every 3rd frame to keep GPU & audio thread completely smooth!
+    const updateShadow = !IS_MOBILE || this.shadowDirty || this.frameCount % 3 === 0;
     this.renderer.shadowMap.needsUpdate = updateShadow;
     this.shadowDirty = false;
     this.renderer.setRenderTarget(this.rtColor);

@@ -43,6 +43,9 @@ class YokusGame {
       fkScore: document.querySelector('#fk-score'),
       roamActBtn: document.querySelector('#roam-act-btn'),
       fkExit: document.querySelector('#fk-exit-btn'),
+      mobileRoamBtns: document.querySelector('#mobile-roam-btns'),
+      mobileJumpBtn: document.querySelector('#mobile-jump-btn'),
+      mobileClimbBtn: document.querySelector('#mobile-climb-btn'),
       rotateHint: document.querySelector('#rotate-hint'),
       rotateDismiss: document.querySelector('#rotate-dismiss'),
     };
@@ -106,9 +109,12 @@ class YokusGame {
       petPurrAt: 0,
       nearSeat: null,
       nearActivity: null,
+      nearMinaret: null, // null | 'up' | 'down'
+      autoClimb: null,
       walkTarget: null,
       stepPuffAt: 0,
     };
+    this.hasTouchInput = IS_MOBILE || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
     this.roamReturnPos = null;
 
     this.lastFrame = performance.now();
@@ -134,6 +140,16 @@ class YokusGame {
     this.ui.teaBtn?.addEventListener('click', () => this.startUnlimitedTea(false));
     this.ui.breadBtn?.addEventListener('click', () => this.startUnlimitedBread(false));
     this.ui.roamActBtn?.addEventListener('click', () => this.triggerFreeRoamAction());
+    this.ui.mobileJumpBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.ui.mobileJumpBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.triggerFreeRoamJump();
+    });
+    this.ui.mobileClimbBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.ui.mobileClimbBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.triggerAutoClimbMinaret();
+    });
     this.ui.fkExit?.addEventListener('click', () => {
       if (this.roamReturnPos && this.state.mode !== 'freeroam') {
         const ret = this.roamReturnPos.clone();
@@ -178,6 +194,7 @@ class YokusGame {
     if (this.started) return;
     this.started = true;
     this.audio.start();
+    this.music.unlock();
     this.ui.opening.classList.add('hidden');
     const n = this.requestedStop;
     if (n === 0) {
@@ -218,6 +235,9 @@ class YokusGame {
     this.ui.ending?.classList.remove('visible');
     this.ui.endActions?.classList.remove('visible');
     this.ui.fkHud?.classList.remove('visible');
+    this.ui.mobileRoamBtns?.classList.remove('visible');
+    this.freeroam.autoClimb = null;
+    this.freeroam.nearMinaret = null;
     this.state.stop = 0;
     this.state.mode = 'arrival';
     this.arrivalTime = 0;
@@ -418,6 +438,8 @@ class YokusGame {
     this.freeroam.pettingCat = null;
     this.freeroam.nearSeat = null;
     this.freeroam.nearActivity = null;
+    this.freeroam.nearMinaret = null;
+    this.freeroam.autoClimb = null;
     this.freeroam.walkTarget = null;
     this.freeroam.stepPuffAt = 0;
     this.interactions.keys?.clear();
@@ -429,12 +451,58 @@ class YokusGame {
     this.music.setStop('river');
     this.freeroam.nearActivity = this.findNearestRoamActivity();
     this.freeroam.nearSeat = this.freeroam.nearActivity?.kind === 'seat' ? this.freeroam.nearActivity.seat : null;
+    this.freeroam.nearMinaret = this.findNearMinaretMode();
     this.updateModeHud();
     this.ui.fkHud?.classList.add('visible');
   }
 
+  noteTouchInput() {
+    if (!this.hasTouchInput) {
+      this.hasTouchInput = true;
+      if (this.state.mode === 'freeroam') this.updateModeHud();
+    }
+  }
+
+  findNearMinaretMode() {
+    const mc = this.world.minaretClimb;
+    if (!mc) return null;
+    const p = this.player.position;
+    const d = Math.hypot(p.x - mc.cx, p.z - mc.cz);
+    if (d < 2.2 && p.y >= mc.yTop - 1.4) return 'down';
+    if (d < 4.8 && p.y < mc.yTop - 1.4) return 'up';
+    return null;
+  }
+
+  triggerAutoClimbMinaret() {
+    if (this.state.mode !== 'freeroam') return;
+    const mc = this.world.minaretClimb;
+    if (!mc) return;
+    const fr = this.freeroam;
+    if (fr.seated) this.standFromFreeRoamSeat();
+    if (fr.pettingCat) this.stopFreeRoamPet();
+    const mode = this.findNearMinaretMode();
+    if (!mode) return;
+    fr.walkTarget = null;
+    fr.vx = 0;
+    fr.vy = 0;
+    fr.vz = 0;
+    fr.grounded = true;
+    if (mode === 'down') {
+      fr.autoClimb = { dir: -1, phase: 'spiral', u: 1.0 };
+    } else {
+      const distBase = Math.hypot(this.player.position.x - mc.basePos.x, this.player.position.z - mc.basePos.z);
+      fr.autoClimb = { dir: 1, phase: distBase > 0.4 ? 'approach' : 'spiral', u: 0.0 };
+    }
+    setPose(this.player, 'walk');
+    this.updateModeHud();
+  }
+
   setFreeRoamTarget(x, z) {
     if (this.state.mode !== 'freeroam') return;
+    if (this.freeroam.autoClimb) {
+      this.freeroam.autoClimb = null;
+      this.updateModeHud();
+    }
     if (this.freeroam.seated) this.standFromFreeRoamSeat();
     if (this.freeroam.pettingCat) this.stopFreeRoamPet();
     // On mobile tap near a balcony/lookout chair, sit right down if close enough!
@@ -457,6 +525,10 @@ class YokusGame {
   triggerFreeRoamJump() {
     if (this.state.mode !== 'freeroam') return;
     const fr = this.freeroam;
+    if (fr.autoClimb) {
+      fr.autoClimb = null;
+      this.updateModeHud();
+    }
     if (fr.seated) {
       this.standFromFreeRoamSeat();
       return;
@@ -637,6 +709,54 @@ class YokusGame {
       }
     }
 
+    // Smooth step-by-step auto-climb up/down the mosque minaret spiral staircase (especially handy on mobile!)
+    if (fr.autoClimb) {
+      if (inFwd !== 0 || inRight !== 0) {
+        fr.autoClimb = null;
+        this.updateModeHud();
+      } else {
+        const mc = this.world.minaretClimb;
+        const ac = fr.autoClimb;
+        const pos = this.player.position;
+        if (ac.phase === 'approach') {
+          const dx = mc.basePos.x - pos.x;
+          const dz = mc.basePos.z - pos.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < 0.22) {
+            ac.phase = 'spiral';
+            ac.u = 0.0;
+          } else {
+            const step = Math.min(dist, 3.4 * dt);
+            pos.x += (dx / dist) * step;
+            pos.z += (dz / dist) * step;
+            pos.y = this.world.walkHeight(pos.x, pos.z, pos.y);
+            if (this.player.userData.pose !== 'walk') setPose(this.player, 'walk');
+            faceFigureSmooth(this.player, mc.basePos, dt, 12);
+          }
+        } else {
+          ac.u = clamp(ac.u + ac.dir * 0.24 * dt, 0, 1);
+          const a = mc.startAngle + ac.u * mc.totalAngle;
+          const nextA = mc.startAngle + clamp(ac.u + ac.dir * 0.04, 0, 1) * mc.totalAngle;
+          pos.set(mc.cx + Math.cos(a) * mc.r, lerp(mc.yBottom, mc.yTop, ac.u), mc.cz + Math.sin(a) * mc.r);
+          if (this.player.userData.pose !== 'walk') setPose(this.player, 'walk');
+          faceFigureSmooth(this.player, V(mc.cx + Math.cos(nextA) * mc.r, pos.y, mc.cz + Math.sin(nextA) * mc.r), dt, 14);
+          if ((ac.dir > 0 && ac.u >= 1) || (ac.dir < 0 && ac.u <= 0)) {
+            if (ac.dir > 0) pos.copy(mc.topPos);
+            else pos.copy(mc.basePos);
+            fr.autoClimb = null;
+            fr.grounded = true;
+            setPose(this.player, 'stand');
+            fr.nearActivity = this.findNearestRoamActivity();
+            fr.nearSeat = fr.nearActivity?.kind === 'seat' ? fr.nearActivity.seat : null;
+            fr.nearMinaret = this.findNearMinaretMode();
+            this.updateModeHud();
+          }
+        }
+        this.rig.updateFreeRoam(dt, this.player.position, 0, 0, false);
+        return;
+      }
+    }
+
     let dirX = 0;
     let dirZ = 0;
     let wantSpeed = 0;
@@ -743,11 +863,13 @@ class YokusGame {
       setPose(this.player, 'stand');
     }
 
-    // Refresh HUD prompt cleanly whenever entering/leaving reach of any village activity, cat, or balcony chair!
+    // Refresh HUD prompt cleanly whenever entering/leaving reach of any village activity, cat, minaret, or balcony chair!
     const nearAct = this.findNearestRoamActivity();
-    const prevKey = fr.nearActivity ? `${fr.nearActivity.kind}-${fr.nearActivity.idx ?? fr.nearActivity.label}` : '';
-    const nextKey = nearAct ? `${nearAct.kind}-${nearAct.idx ?? nearAct.label}` : '';
+    const nearMin = this.findNearMinaretMode();
+    const prevKey = `${fr.nearActivity ? `${fr.nearActivity.kind}-${fr.nearActivity.idx ?? fr.nearActivity.label}` : ''}|${fr.nearMinaret || ''}`;
+    const nextKey = `${nearAct ? `${nearAct.kind}-${nearAct.idx ?? nearAct.label}` : ''}|${nearMin || ''}`;
     fr.nearSeat = nearAct?.kind === 'seat' ? nearAct.seat : null;
+    fr.nearMinaret = nearMin;
     if (prevKey !== nextKey) {
       fr.nearActivity = nearAct;
       this.updateModeHud();
@@ -774,11 +896,14 @@ class YokusGame {
     this.freeroam.pettingCat = null;
     this.freeroam.nearSeat = null;
     this.freeroam.nearActivity = null;
+    this.freeroam.nearMinaret = null;
+    this.freeroam.autoClimb = null;
     this.freeroam.walkTarget = null;
     this.interactions.keys?.clear();
     this.rig.setUserZoom(1.0);
     if (this.ui.roamActBtn) this.ui.roamActBtn.hidden = true;
     this.ui.fkHud?.classList.remove('visible');
+    this.ui.mobileRoamBtns?.classList.remove('visible');
     this.state.stop = 7;
     this.state.mode = 'final';
     this.state.white = 0;
@@ -793,34 +918,44 @@ class YokusGame {
     if (!this.ui.fkScore) return;
     const actBtn = this.ui.roamActBtn;
     const exitBtn = this.ui.fkExit;
+    const mobBox = this.ui.mobileRoamBtns;
+    const climbBtn = this.ui.mobileClimbBtn;
     if (this.state.mode === 'freeroam') {
       if (exitBtn) exitBtn.textContent = 'back to dusk';
+      if (mobBox) mobBox.classList.toggle('visible', !!this.hasTouchInput);
+      if (climbBtn) {
+        const showClimb = !!this.hasTouchInput && !!this.freeroam.nearMinaret && !this.freeroam.autoClimb;
+        climbBtn.hidden = !showClimb;
+        if (showClimb) climbBtn.textContent = this.freeroam.nearMinaret === 'down' ? 'climb down' : 'climb minaret';
+      }
       if (this.freeroam.seated) {
-        this.ui.fkScore.textContent = 'sitting & watching · wasd to stand';
+        this.ui.fkScore.textContent = this.hasTouchInput ? 'sitting & watching' : 'sitting & watching · wasd to stand';
         if (actBtn) {
           actBtn.hidden = false;
-          actBtn.textContent = IS_MOBILE ? 'stand up' : 'e · stand up';
+          actBtn.textContent = this.hasTouchInput ? 'stand up' : 'e · stand up';
         }
       } else if (this.freeroam.pettingCat) {
-        this.ui.fkScore.textContent = 'petting cat · wasd to stand';
+        this.ui.fkScore.textContent = this.hasTouchInput ? 'petting cat' : 'petting cat · wasd to stand';
         if (actBtn) {
           actBtn.hidden = false;
-          actBtn.textContent = IS_MOBILE ? 'stand up' : 'e · stand up';
+          actBtn.textContent = this.hasTouchInput ? 'stand up' : 'e · stand up';
         }
       } else if (this.freeroam.nearActivity) {
-        this.ui.fkScore.textContent = IS_MOBILE ? 'tap to walk · drag look' : 'wasd roam · space jump · drag look';
+        this.ui.fkScore.textContent = this.hasTouchInput ? 'tap to walk · drag look' : 'wasd roam · space jump · drag look';
         if (actBtn) {
           actBtn.hidden = false;
-          actBtn.textContent = (IS_MOBILE ? '' : 'e · ') + this.freeroam.nearActivity.label;
+          actBtn.textContent = (this.hasTouchInput ? '' : 'e · ') + this.freeroam.nearActivity.label;
         }
       } else {
-        this.ui.fkScore.textContent = IS_MOBILE
+        this.ui.fkScore.textContent = this.hasTouchInput
           ? 'tap to walk · drag to look'
           : 'wasd roam · space jump · shift jog · drag look';
         if (actBtn) actBtn.hidden = true;
       }
     } else {
       if (actBtn) actBtn.hidden = true;
+      if (mobBox) mobBox.classList.remove('visible');
+      if (climbBtn) climbBtn.hidden = true;
       if (exitBtn) exitBtn.textContent = this.roamReturnPos ? 'back to roam' : 'back to dusk';
       if (this.football.unlimitedMode) {
         const f = this.football;
@@ -949,8 +1084,13 @@ class YokusGame {
     this.pipeline.render(this.time, this.state.memoryLevel, this.state.white);
   }
 
-  // True unlocked requestAnimationFrame (60/120 Hz silky-smooth!)
+  // Desktop: unlocked 60/120 Hz; Mobile: paced ~36 FPS so GPU/CPU never starve the audio thread!
   loop(now) {
+    if (IS_MOBILE && !this.manual && this.lastRender && now - this.lastRender < 26) {
+      requestAnimationFrame(this.loop);
+      return;
+    }
+    this.lastRender = now;
     const raw = Math.max(0.001, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     this.fps = lerp(this.fps, 1 / raw, 0.05);
@@ -1033,7 +1173,11 @@ class YokusGame {
     this.freeroam.inWater = false;
     this.freeroam.seated = null;
     this.freeroam.nearSeat = null;
+    this.freeroam.nearActivity = null;
+    this.freeroam.nearMinaret = null;
+    this.freeroam.autoClimb = null;
     this.freeroam.walkTarget = null;
+    this.ui.mobileRoamBtns?.classList.remove('visible');
     this.player.scale.setScalar(1);
     this.requestedStop = n;
     this.state.ended = false;

@@ -244,6 +244,7 @@ export class InteractionSystem {
       this.pointerDown = true;
       this.lastInput = this.game.time;
       if (isTouch) {
+        this.game.noteTouchInput?.();
         this.activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.activeTouches.size >= 2) {
           const pts = [...this.activeTouches.values()];
@@ -611,13 +612,39 @@ export class AudioManager {
 
   update(game) {
     if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Throttle ambient Web Audio parameter updates to ~8 Hz with smooth audio-thread ramping (zero mobile crackle!)
+    if (!this._lastAmbAt || game.time - this._lastAmbAt >= 0.12) {
+      this._lastAmbAt = game.time;
+      let windV = 0.026;
+      let riverV = 0;
+      let fireV = 0;
+      if (game.state.mode === 'freeroam' && game.player) {
+        const p = game.player.position;
+        const rDist = Math.abs(p.z - riverCenterZ(p.x));
+        const oDist = Math.hypot(p.x - 7.2, p.z + 28.0);
+        windV = 0.024;
+        riverV = clamp(1 - (rDist - 3.0) / 11.0, 0, 1) * 0.095;
+        fireV = clamp(1 - (oDist - 2.5) / 8.5, 0, 1) * 0.05;
+      } else {
+        const stop = STOP_NAMES[game.state.stop];
+        windV = stop === 'readingroom' || stop === 'ending' ? 0.01 : 0.026;
+        riverV = stop === 'river' ? 0.1 : 0;
+        fireV = stop === 'bread' ? 0.055 : 0;
+      }
+      if (this.muted) {
+        windV = 0;
+        riverV = 0;
+        fireV = 0;
+      }
+      this.amb.wind.gain.setTargetAtTime(windV, now, 0.12);
+      this.amb.river.gain.setTargetAtTime(riverV, now, 0.12);
+      this.amb.fire.gain.setTargetAtTime(fireV, now, 0.12);
+    }
+
     if (game.state.mode === 'freeroam' && game.player) {
       const p = game.player.position;
-      const rDist = Math.abs(p.z - riverCenterZ(p.x));
       const oDist = Math.hypot(p.x - 7.2, p.z + 28.0);
-      this.amb.wind.gain.value = this.muted ? 0 : 0.024;
-      this.amb.river.gain.value = this.muted ? 0 : clamp(1 - (rDist - 3.0) / 11.0, 0, 1) * 0.095;
-      this.amb.fire.gain.value = this.muted ? 0 : clamp(1 - (oDist - 2.5) / 8.5, 0, 1) * 0.05;
       if (game.time > this.nextCrackle && oDist < 9.5) {
         this.nextCrackle = game.time + 0.6 + game.rng() * 1.4;
         this.noise(0.05, 2800 + game.rng() * 1400, 0.022);
@@ -629,11 +656,8 @@ export class AudioManager {
       }
       return;
     }
-    const stop = STOP_NAMES[game.state.stop];
-    this.amb.wind.gain.value = this.muted ? 0 : stop === 'readingroom' || stop === 'ending' ? 0.01 : 0.026;
-    this.amb.river.gain.value = this.muted ? 0 : stop === 'river' ? 0.1 : 0;
-    this.amb.fire.gain.value = this.muted ? 0 : stop === 'bread' ? 0.055 : 0;
 
+    const stop = STOP_NAMES[game.state.stop];
     if (game.time > this.nextMurmur && stop === 'teahouse' && !game.state.memory) {
       this.nextMurmur = game.time + 3.5 + game.rng() * 4.5;
       this.noise(0.55 + game.rng() * 0.5, 260 + game.rng() * 160, 0.022);
@@ -652,7 +676,9 @@ export class AudioManager {
 
   toggleMute() {
     this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.72;
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(this.muted ? 0 : 0.72, this.ctx.currentTime, 0.04);
+    }
   }
 }
 
@@ -664,6 +690,33 @@ export class MusicManager {
     this.current = new Set();
     this.credits = [];
     this.ready = false;
+    this.pendingStop = null;
+    this._updateAccum = 0;
+    this.canPlayOgg = (() => {
+      try {
+        const probe = document.createElement('audio');
+        return !!(probe.canPlayType && probe.canPlayType('audio/ogg; codecs="vorbis"'));
+      } catch {
+        return true;
+      }
+    })();
+
+    // Cleanly pause/resume music when locking phone or switching tabs on mobile!
+    document.addEventListener('visibilitychange', () => {
+      const ctx = this.game.audio?.ctx;
+      if (document.hidden) {
+        for (const e of this.loaded.values()) {
+          if (!e.audio.paused) e.audio.pause();
+        }
+        ctx?.suspend?.().catch(() => {});
+      } else if (this.game.started) {
+        ctx?.resume?.().catch(() => {});
+        for (const [file, e] of this.loaded) {
+          if (this.current.has(file) && !e.failed) this.safePlay(e);
+        }
+      }
+    });
+
     fetch('./audio/music/tracks.json')
       .then((r) => (r.ok ? r.json() : []))
       .then((t) => {
@@ -672,7 +725,9 @@ export class MusicManager {
         const el = document.querySelector('#music-credits');
         if (el) el.textContent = this.credits.length ? 'Music · ' + this.credits.join(' · ') : '';
         this.ready = true;
-        this.setStop(this.pendingStop || (this.game.state.mode === 'freeroam' ? 'river' : STOP_NAMES[this.game.state.stop]));
+        if (this.game.started) {
+          this.setStop(this.pendingStop || (this.game.state.mode === 'freeroam' ? 'river' : STOP_NAMES[this.game.state.stop]));
+        }
       })
       .catch(() => {
         this.tracks = [];
@@ -680,55 +735,131 @@ export class MusicManager {
       });
   }
 
+  unlock() {
+    if (this.ready && this.pendingStop) {
+      this.setStop(this.pendingStop);
+    }
+    for (const [file, e] of this.loaded) {
+      if (this.current.has(file) && !e.failed) this.safePlay(e);
+    }
+  }
+
+  resolveTrack(t) {
+    // On iOS Safari (no Ogg Vorbis support), gracefully fall back to a compatible MP3 track instead of failing/stuttering!
+    if (!this.canPlayOgg && t.file.endsWith('.ogg')) {
+      const fallbackName = t.use?.includes('readingroom') ? 'ending-dreaming-guitar.mp3' : 'river-down-the-river.mp3';
+      const mp3 = this.tracks.find((x) => x.file === fallbackName);
+      if (mp3) return mp3;
+    }
+    return t;
+  }
+
   setStop(name) {
     this.pendingStop = name;
-    if (!this.ready) return;
-    const matches = this.tracks.filter(
+    if (!this.ready || !this.game.started) return;
+    const rawMatches = this.tracks.filter(
       (t) => t.use?.includes(name) || (name === 'arrival' && t.use?.includes('minibus'))
     );
+    const matches = [];
+    const seen = new Set();
+    for (const raw of rawMatches) {
+      const t = this.resolveTrack(raw);
+      if (!seen.has(t.file)) {
+        seen.add(t.file);
+        matches.push(t);
+      }
+    }
     this.current = new Set(matches.map((t) => t.file));
     for (const t of matches) this.ensure(t);
     for (const [file, entry] of this.loaded) {
       if (!this.current.has(file)) entry.target = 0;
     }
+    this._updateAccum = 1; // Apply immediately on next tick
+  }
+
+  safePlay(e) {
+    if (e.failed || e.playPending || !e.audio.paused || document.hidden) return;
+    const now = performance.now();
+    if (e.lastPlayTry && now - e.lastPlayTry < 1500) return;
+    e.lastPlayTry = now;
+    e.playPending = true;
+    const p = e.audio.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        e.playPending = false;
+      }).catch(() => {
+        e.playPending = false;
+      });
+    } else {
+      e.playPending = false;
+    }
+  }
+
+  attachWebAudio(e) {
+    if (e.gain || e.mediaFailed || !this.game.audio?.ctx) return;
+    const ctx = this.game.audio.ctx;
+    try {
+      const src = ctx.createMediaElementSource(e.audio);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      if (e.t.diegetic) {
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = e.t.use.includes('minibus') ? 1900 : 1250;
+        filter.Q.value = 0.52;
+        src.connect(filter).connect(gain).connect(this.game.audio.master);
+      } else {
+        // Route ALL tracks through a Web Audio GainNode so iOS Safari crossfades & mutes cleanly on the audio thread!
+        src.connect(gain).connect(this.game.audio.master);
+      }
+      e.gain = gain;
+      e.audio.volume = 1;
+    } catch {
+      e.mediaFailed = true;
+      e.audio.volume = 0;
+    }
   }
 
   ensure(t) {
     if (this.loaded.has(t.file)) {
-      this.loaded.get(t.file).target = 1;
+      const e = this.loaded.get(t.file);
+      e.target = 1;
+      this.attachWebAudio(e);
+      if (!e.failed) this.safePlay(e);
       return;
     }
     const a = new Audio('./audio/music/' + encodeURIComponent(t.file).replaceAll('%2F', '/'));
     a.loop = true;
     a.preload = 'auto';
-    a.crossOrigin = 'anonymous';
-    const e = { audio: a, t, target: 1, volume: 0, gain: null };
+    a.playsInline = true;
+    const e = { audio: a, t, target: 1, volume: 0, gain: null, failed: false, playPending: false, lastPlayTry: 0 };
+    a.addEventListener('error', () => {
+      e.failed = true;
+      e.playPending = false;
+    });
     this.loaded.set(t.file, e);
-    if (t.diegetic && this.game.audio.ctx) {
-      try {
-        const src = this.game.audio.ctx.createMediaElementSource(a);
-        const filter = this.game.audio.ctx.createBiquadFilter();
-        const gain = this.game.audio.ctx.createGain();
-        filter.type = 'bandpass';
-        filter.frequency.value = t.use.includes('minibus') ? 1900 : 1250;
-        filter.Q.value = 0.52;
-        gain.gain.value = 0;
-        src.connect(filter).connect(gain).connect(this.game.audio.master);
-        e.gain = gain;
-      } catch {
-        a.volume = 0;
-      }
-    } else {
-      a.volume = 0;
-    }
-    a.play().catch(() => {});
+    this.attachWebAudio(e);
+    this.safePlay(e);
   }
 
   update(dt) {
+    // Throttle music mix updates to ~8 Hz and let Web Audio setTargetAtTime smooth on the dedicated audio thread!
+    this._updateAccum += dt;
+    if (this._updateAccum < 0.12) return;
+    const stepDt = Math.min(this._updateAccum, 0.25);
+    this._updateAccum = 0;
+
+    const ctx = this.game.audio?.ctx;
+    const now = ctx ? ctx.currentTime : 0;
     const duck = this.game.state.memory ? 0.28 : 1;
+
     for (const [file, e] of this.loaded) {
+      if (e.failed) continue;
       const active = this.current.has(file);
-      e.volume = lerp(e.volume, active ? e.target : 0, 1 - Math.exp(-dt * 0.8));
+      if (active && !e.gain && ctx) this.attachWebAudio(e);
+      // Clean ~1.3s fade-out / ~1.0s fade-in so tracks never muddily overlap!
+      const rate = active ? 1.8 : 2.6;
+      e.volume = lerp(e.volume, active ? e.target : 0, 1 - Math.exp(-stepDt * rate));
       let positional = e.t.volume ?? 0.44;
       if (e.t.diegetic) {
         const pos = e.t.use.includes('minibus')
@@ -736,11 +867,19 @@ export class MusicManager {
           : this.game.world.teahouse.position;
         positional = clamp(1 - this.game.camera.position.distanceTo(pos) / 42, 0.06, 0.45);
       }
-      const v = e.volume * duck * positional;
-      if (e.gain) e.gain.gain.value = this.game.audio.muted ? 0 : v;
-      else e.audio.volume = clamp(this.game.audio.muted ? 0 : v, 0, 1);
-      if (e.volume < 0.002 && !active) e.audio.pause();
-      else if (active && e.audio.paused) e.audio.play().catch(() => {});
+      const v = this.game.audio.muted ? 0 : clamp(e.volume * duck * positional, 0, 1);
+      if (e.gain && ctx) {
+        e.gain.gain.setTargetAtTime(v, now, 0.12);
+      } else {
+        e.audio.volume = v;
+      }
+      if (!active && e.volume < 0.012) {
+        e.volume = 0;
+        if (e.gain && ctx) e.gain.gain.setTargetAtTime(0, now, 0.04);
+        if (!e.audio.paused) e.audio.pause();
+      } else if (active && e.audio.paused) {
+        this.safePlay(e);
+      }
     }
   }
 }

@@ -462,7 +462,7 @@ export class World {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    this.ambientDust = makeAirMotes(this.rng, 56);
+    this.ambientDust = makeAirMotes(this.rng, IS_MOBILE ? 32 : 56);
     this.scene.add(this.ambientDust);
   }
 
@@ -693,8 +693,8 @@ export class World {
     addLookoutChair(4.7, 38.2, Math.PI, V(0.0, ground(0, 0), 0.0), 'uphill village viewpoint', 18.5, false);
 
     // Masked swaying grass & wildflowers (ZERO tufts in water, road, pitch, or buildings!)
-    this.scene.add(makeGrass(this.rng, this.mask, IS_MOBILE ? 1600 : 4200));
-    this.scene.add(makeWildflowers(this.rng, this.mask, IS_MOBILE ? 120 : 220));
+    this.scene.add(makeGrass(this.rng, this.mask, IS_MOBILE ? 900 : 4200));
+    this.scene.add(makeWildflowers(this.rng, this.mask, IS_MOBILE ? 80 : 220));
   }
 
   buildVillageLife() {
@@ -711,14 +711,29 @@ export class World {
       const startWorldAngle = mm.startLocalAngle - mm.turn;
       this.addWalkSpiral(minX, minZ, 0.44, 1.44, my + mm.yBottom, my + mm.yTop, startWorldAngle, mm.totalAngle);
       this.addWalkCircle(minX, minZ, mm.balconyR + 0.12, my + mm.yTop);
+      const stAng = startWorldAngle + mm.totalAngle + 0.35;
+      const baseX = minX + Math.cos(startWorldAngle) * mm.rSpiral;
+      const baseZ = minZ + Math.sin(startWorldAngle) * mm.rSpiral;
+      const topX = minX + Math.cos(stAng) * 0.92;
+      const topZ = minZ + Math.sin(stAng) * 0.92;
+      this.minaretClimb = {
+        cx: minX,
+        cz: minZ,
+        r: mm.rSpiral,
+        yBottom: my + mm.yBottom,
+        yTop: my + mm.yTop,
+        startAngle: startWorldAngle,
+        totalAngle: mm.totalAngle,
+        basePos: V(baseX, ground(baseX, baseZ), baseZ),
+        topPos: V(topX, my + mm.yTop, topZ),
+      };
       // Panoramic minaret şerefe lookout spot facing out over the ENTIRE village!
       const viewAng = startWorldAngle + mm.totalAngle + 0.95;
       const sx = minX + Math.cos(viewAng) * 0.92;
       const sz = minZ + Math.sin(viewAng) * 0.92;
-      const stAng = startWorldAngle + mm.totalAngle + 0.35;
       this.roamSeats.push({
         pos: V(sx, my + mm.yTop + 0.08, sz),
-        standPos: V(minX + Math.cos(stAng) * 0.92, my + mm.yTop, minZ + Math.sin(stAng) * 0.92),
+        standPos: V(topX, my + mm.yTop, topZ),
         lookAt: V(2.0, my + mm.yTop - 3.0, -14.0),
         label: 'minaret lookout',
         viewHeight: 25.0,

@@ -284,6 +284,54 @@ body {
   display: none;
 }
 
+#mobile-roam-btns {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 16px));
+  bottom: max(22px, env(safe-area-inset-bottom, 22px));
+  display: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 7;
+  pointer-events: none;
+}
+
+#mobile-roam-btns.visible {
+  display: flex;
+}
+
+#mobile-jump-btn,
+#mobile-climb-btn {
+  pointer-events: auto;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 244, 214, 0.58);
+  background: rgba(44, 34, 52, 0.72);
+  color: #fff6dc;
+  font: 10px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 4px 14px rgba(24, 18, 28, 0.28);
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+
+#mobile-climb-btn {
+  border-color: rgba(244, 199, 98, 0.88);
+  background: rgba(68, 48, 34, 0.82);
+  color: #ffe9a8;
+}
+
+#mobile-jump-btn:active,
+#mobile-climb-btn:active {
+  transform: scale(0.95);
+}
+
+#mobile-climb-btn[hidden] {
+  display: none;
+}
+
 #mute-mark {
   position: fixed;
   right: 18px;
